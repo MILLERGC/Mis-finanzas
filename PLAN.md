@@ -67,3 +67,10 @@ Cada fase se publica en la misma URL del artefacto y se commitea en `claude/eleg
 - Compras a cuotas (1–72) con valor de cuota, saldo pendiente y fecha de terminación.
 - Pagos proyectados de los próximos 6 meses, estado (pendiente / vence pronto / vencido / pagado) y alertas en el Resumen.
 - "Registrar pago" crea una transferencia desde tu cuenta hacia la tarjeta.
+
+## Fase 2 entregada (v0.2)
+- Presupuestos: tope mensual por categoría, semáforo, marca del día en cada barra, "te quedan X por semana", sugerencia automática (promedio de 3 meses, -20% en prescindibles) y regla 50/30/20.
+- Deudas: "Lo que debo" y "Lo que me deben", abonos/cobros con historial (opcionalmente registrados en una cuenta), fecha del próximo pago, plazo e intereses estimados, carga de cuotas vs ingresos y orden de pago avalancha / bola de nieve (incluye tarjetas).
+- Metas: progreso, aporte mensual necesario, estado (a tiempo / atrasada / vencida / lograda) y comparación con el ahorro promedio.
+- Los préstamos recibidos/otorgados y sus cobros no cuentan como ingreso ni gasto del mes. El patrimonio neto ya resta deudas y suma lo que te deben.
+- Nuevas alertas en el Resumen: presupuestos al 80% o excedidos, pagos y cobros próximos o atrasados, metas atrasadas.

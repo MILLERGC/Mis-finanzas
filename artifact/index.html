@@ -61,7 +61,7 @@ main { padding-block: 20px 110px; display: grid; gap: 20px }
 .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px }
 .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 4px; min-width: 0 }
 .kpi .lbl { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
-.kpi .val { font-size: 1.35rem; font-weight: 500; overflow-wrap: anywhere }
+.kpi .val { font-size: clamp(1rem, 4.4vw, 1.35rem); font-weight: 500; white-space: nowrap }
 .kpi .sub { font-size: .8rem; color: var(--muted) }
 .pos { color: var(--pos) } .neg { color: var(--neg) }
 @media (max-width: 820px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
@@ -169,6 +169,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
 .sched { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 10px }
 .sched div { background: var(--sunken); border-radius: 8px; padding: 8px 10px; display: grid; gap: 2px; font-size: .8rem }
 .sched div b { font-size: .92rem }
+.cat-row .bar.budget { position: relative; height: 8px; overflow: visible }
+.cat-row .bar.budget b { background: var(--accent) } .cat-row .bar.budget b.warn { background: var(--warn) } .cat-row .bar.budget b.bad { background: var(--neg) }
+.cat-row .bar.budget i { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--ink); opacity: .55; border-radius: 1px }
 .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end }
 @media (prefers-reduced-motion: no-preference) { .kpi, .panel { transition: border-color .2s } }
 </style>
@@ -186,7 +189,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="resumen" aria-selected="true">Resumen</button>
       <button role="tab" data-tab="movimientos" aria-selected="false">Movimientos</button>
+      <button role="tab" data-tab="presupuestos" aria-selected="false">Presupuestos</button>
       <button role="tab" data-tab="tarjetas" aria-selected="false">Tarjetas</button>
+      <button role="tab" data-tab="deudas" aria-selected="false">Deudas</button>
+      <button role="tab" data-tab="metas" aria-selected="false">Metas</button>
       <button role="tab" data-tab="cuentas" aria-selected="false">Cuentas</button>
     </nav>
   </div>
@@ -256,6 +262,20 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   </form>
 </dialog>
 
+<dialog id="genDlg">
+  <form id="genForm" method="dialog" novalidate>
+    <div class="panel-head" style="margin:0"><h2 id="genTitle"></h2><button type="button" class="btn small" id="genClose">Cerrar</button></div>
+    <p class="hint" id="genIntro" style="margin:0"></p>
+    <div class="form-grid" id="genFields"></div>
+    <p class="err" id="genErr"></p>
+    <div class="actions" style="margin:0">
+      <button type="button" class="btn danger left" id="genDel" hidden>Eliminar</button>
+      <button type="button" class="btn" id="genCancel">Cancelar</button>
+      <button type="submit" class="btn primary" id="genSave">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -268,9 +288,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
       ["Vivienda", true], ["Servicios", true], ["Mercado", true], ["Transporte", true], ["Salud", true],
       ["Educación", true], ["Cuotas de deudas", true], ["Impuestos", true], ["Restaurantes", false],
       ["Domicilios", false], ["Entretenimiento", false], ["Suscripciones", false], ["Ropa y cuidado", false],
-      ["Regalos", false], ["Intereses y comisiones", false], ["Donaciones", true], ["Otros gastos", false]
+      ["Regalos", false], ["Intereses y comisiones", false], ["Donaciones", true], ["Préstamo otorgado", true], ["Otros gastos", false]
     ],
-    ingreso: [["Salario", true], ["Honorarios", true], ["Negocio", true], ["Inversiones", true], ["Arriendo recibido", true], ["Préstamo recibido", true], ["Otros ingresos", true]]
+    ingreso: [["Salario", true], ["Honorarios", true], ["Negocio", true], ["Inversiones", true], ["Arriendo recibido", true], ["Préstamo recibido", true], ["Cobro de préstamo", true], ["Otros ingresos", true]]
   };
   const ESENCIAL = Object.fromEntries(CATS.gasto);
   const TIPO_CUENTA = { banco: "Banco", billetera: "Billetera digital", efectivo: "Efectivo", tarjeta: "Tarjeta de crédito", inversion: "Inversión" };
@@ -278,7 +298,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   // ---------- Estado ----------
   const S = {
     mode: "loading", // db | local | loading
-    cuentas: [], movs: [], config: { tasaUSD: 4000, monedaBase: "COP" },
+    cuentas: [], movs: [], pres: [], deudas: [], metas: [], config: { tasaUSD: 4000, monedaBase: "COP" },
+    estrategia: "avalancha", histOpen: null,
     tab: "resumen", month: ym(new Date()),
     filt: { tipo: "", cuenta: "", q: "" },
   };
@@ -343,13 +364,14 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   function patrimonio() {
     let act = 0, pas = 0;
     for (const c of S.cuentas) { const v = toBase(saldoCuenta(c), c.moneda); if (v >= 0) act += v; else pas += -v }
+    for (const d of S.deudas) { const v = saldoDeuda(d); if (d.tipo === "debo") pas += v; else act += v }
     return { act, pas, neto: act - pas };
   }
   function resumenMes(month) {
     let ing = 0, gas = 0, presc = 0, ded = 0;
     const porCat = {};
     for (const m of S.movs) {
-      if (!m.fecha || m.fecha.slice(0, 7) !== month) continue;
+      if (!m.fecha || m.fecha.slice(0, 7) !== month || NEUTRAL.has(m.categoria)) continue;
       const v = movBase(m);
       if (m.tipo === "ingreso") ing += v;
       else if (m.tipo === "gasto") {
@@ -423,10 +445,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   // ---------- Almacenamiento ----------
   const LS_KEY = "mis-finanzas-local-v1";
   function loadLocal() {
-    try { const d = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (d) { S.cuentas = d.cuentas || []; S.movs = d.movs || []; S.config = { ...S.config, ...(d.config || {}) } } } catch (e) { }
+    try { const d = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (d) { S.cuentas = d.cuentas || []; S.movs = d.movs || []; S.pres = d.pres || []; S.deudas = d.deudas || []; S.metas = d.metas || []; S.config = { ...S.config, ...(d.config || {}) } } } catch (e) { }
   }
-  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ cuentas: S.cuentas, movs: S.movs, config: S.config })) } catch (e) { } }
-  const COL = { cuentas: "cuentas", movs: "movimientos" };
+  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ cuentas: S.cuentas, movs: S.movs, pres: S.pres, deudas: S.deudas, metas: S.metas, config: S.config })) } catch (e) { } }
+  const COL = { cuentas: "cuentas", movs: "movimientos", pres: "presupuestos", deudas: "deudas", metas: "metas" };
 
   async function put(kind, id, data) {
     if (S.mode === "db") { await db.collection(COL[kind]).doc(id).set(data); return }
@@ -456,6 +478,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     const onErr = (e) => { setStatus(e?.code === "revoked" ? "Sin acceso a los datos" : "Error de sincronización", "warn") };
     db.collection("cuentas").onSnapshot(s => { S.cuentas = withId(s).sort((a, b) => (a.creado || 0) - (b.creado || 0)); render() }, onErr);
     db.collection("movimientos").orderBy("fecha", "desc").limit(1000).onSnapshot(s => { S.movs = withId(s); render() }, onErr);
+    const byCreado = (a, b) => (a.creado || 0) - (b.creado || 0);
+    db.collection("presupuestos").onSnapshot(s => { S.pres = withId(s); render() }, onErr);
+    db.collection("deudas").onSnapshot(s => { S.deudas = withId(s).sort(byCreado); render() }, onErr);
+    db.collection("metas").onSnapshot(s => { S.metas = withId(s).sort(byCreado); render() }, onErr);
     db.doc("config/general").onSnapshot(s => { if (s.exists) { S.config = { ...S.config, ...s.data() }; render() } }, onErr);
   }
   function setStatus(t, cls) { const el = $("status"); el.textContent = t; el.className = "status " + (cls || "") }
@@ -466,7 +492,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === S.tab)));
     const v = $("view");
     if (S.mode === "loading") { v.innerHTML = `<section class="panel empty"><h2>Cargando tus finanzas…</h2><p>Conectando con la base de datos.</p></section>`; return }
-    v.innerHTML = S.tab === "resumen" ? vResumen() : S.tab === "movimientos" ? vMovs() : S.tab === "tarjetas" ? vTarjetas() : vCuentas();
+    const views = { resumen: vResumen, movimientos: vMovs, presupuestos: vPresupuestos, tarjetas: vTarjetas, deudas: vDeudas, metas: vMetas, cuentas: vCuentas };
+    v.innerHTML = (views[S.tab] || vResumen)();
   }
 
   function vTarjetas() {
@@ -514,7 +541,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     const r = resumenMes(S.month), p = patrimonio();
     const prev = resumenMes(shiftMonth(S.month, -1));
     const dGas = prev.gas > 0 ? (r.gas - prev.gas) / prev.gas : null;
-    const hasEx = S.movs.some(m => m.ejemplo) || S.cuentas.some(c => c.ejemplo);
+    const hasEx = ["movs", "cuentas", "pres", "deudas", "metas"].some(k => S[k].some(x => x.ejemplo));
     return `
       ${hasEx ? `<section class="panel" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px"><span class="tag ex" style="margin:0">Ejemplo</span><span class="hint" style="flex:1 1 220px">Estás viendo datos de ejemplo. Bórralos cuando quieras empezar con los tuyos.</span><button class="btn small" data-act="unseed">Quitar ejemplos</button></section>` : ""}
       <section class="kpis">
@@ -554,6 +581,18 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
       else if (e.estado === "pronto" && e.yaCortado) out.push({ lvl: "warn", t: `Paga ${c.nombre} ${e.dias === 0 ? "hoy" : `en ${e.dias} días`}`, d: ` ${money(e.pendiente, c.moneda)} antes del ${fechaCorta(e.fechaPago)}.` });
       if (e.uso != null && e.uso > .7) out.push({ lvl: "warn", t: `${c.nombre}: ${Math.round(e.uso * 100)}% del cupo usado`, d: " Evita nuevas compras con esta tarjeta hasta bajar del 30%." });
     }
+    for (const d of S.deudas) {
+      const f = proxFechaDeuda(d); if (!f) continue;
+      const dd = diasHasta(f), debo = d.tipo === "debo";
+      if (dd < 0) out.push({ lvl: "bad", t: debo ? `Pago atrasado: ${d.contraparte}` : `Cobro pendiente: ${d.contraparte}`, d: ` Era el ${fechaCorta(f)}. Saldo: ${money(saldoDeuda(d))}.` });
+      else if (dd <= 5) out.push({ lvl: "warn", t: `${debo ? "Pagar a" : "Cobrar a"} ${d.contraparte} ${dd === 0 ? "hoy" : `en ${dd} días`}`, d: ` ${d.cuota ? "Cuota" : "Saldo"}: ${money(d.cuota ? Math.min(d.cuota, saldoDeuda(d)) : saldoDeuda(d))}.` });
+    }
+    for (const p of S.pres) {
+      const g = r.porCat[p.categoria] || 0;
+      if (g > p.tope) out.push({ lvl: "bad", t: `Presupuesto excedido: ${p.categoria}`, d: ` Llevas ${money(g)} de ${money(p.tope)}.` });
+      else if (g >= p.tope * .8) out.push({ lvl: "warn", t: `${p.categoria} al ${Math.round(g / p.tope * 100)}% del presupuesto`, d: ` Te quedan ${money(p.tope - g)} este mes.` });
+    }
+    for (const m of S.metas) { const e = estadoMeta(m); if (!e.lograda && (e.atrasada || e.vencida)) out.push({ lvl: "warn", t: `Meta ${e.vencida ? "vencida" : "atrasada"}: ${m.nombre}`, d: e.porMes && !e.vencida ? ` Aparta ${money(e.porMes)} al mes para llegar a tiempo.` : ` Te faltan ${money(e.falta)}. Ajusta la fecha o el monto.` }) }
     if (!r.ing && !r.gas) return out.concat([{ lvl: "", t: "Sin movimientos este mes", d: " Registra tus ingresos y gastos con el botón “+ Movimiento” para ver tu análisis." }]);
     if (r.gas > r.ing && r.ing > 0) out.push({ lvl: "bad", t: "Gastas más de lo que ganas", d: ` Este mes el déficit es de ${money(r.gas - r.ing)}. Revisa primero las categorías prescindibles.` });
     if (!r.ing && r.gas) out.push({ lvl: "warn", t: "No hay ingresos registrados", d: " Registra tu salario u otros ingresos para calcular tu tasa de ahorro." });
@@ -663,6 +702,328 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
         <button class="btn" data-act="save-cfg">Guardar tasa</button>
       </div>
     </section>`;
+  }
+
+  // ---------- Fase 2: presupuestos, deudas y metas ----------
+  // Movimientos de préstamos: mueven dinero pero no son ingreso ni gasto del mes
+  const NEUTRAL = new Set(["Préstamo recibido", "Préstamo otorgado", "Cobro de préstamo"]);
+  function slug(s) { return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") }
+  const presDe = (cat) => S.pres.find(p => p.categoria === cat);
+  const catsPresupuesto = () => CATS.gasto.map(([c]) => c).filter(c => !NEUTRAL.has(c));
+  const ctasNoTarjeta = () => S.cuentas.filter(c => !isCard(c));
+  function sugerencias() {
+    const out = {}, meses = [1, 2, 3].map(i => shiftMonth(S.month, -i)).filter(m => S.movs.some(x => x.fecha?.slice(0, 7) === m));
+    for (const m of meses) for (const [c, v] of Object.entries(resumenMes(m).porCat)) out[c] = (out[c] || 0) + v / meses.length;
+    for (const c in out) out[c] = Math.ceil(out[c] * (ESENCIAL[c] === false ? 0.8 : 1) / 10000) * 10000;
+    return out;
+  }
+  function avanceMes(month) {
+    const t = today(), tm = t.slice(0, 7);
+    return month < tm ? 1 : month > tm ? 0 : Number(t.slice(8, 10)) / daysIn(month);
+  }
+  const saldoDeuda = (d) => Math.max(0, (Number(d.monto) || 0) - (d.pagos || []).reduce((s, p) => s + (Number(p.monto) || 0), 0));
+  function proxFechaDeuda(d) {
+    if (saldoDeuda(d) <= 0) return null;
+    if (Number(d.diaPago) > 0) {
+      const tm = today().slice(0, 7);
+      const pagadoMes = (d.pagos || []).some(p => p.fecha?.slice(0, 7) === tm);
+      return dayOf(pagadoMes ? shiftMonth(tm, 1) : tm, d.diaPago);
+    }
+    return d.vencimiento || null;
+  }
+  function plazoDeuda(d) {
+    const s = saldoDeuda(d), c = Number(d.cuota) || 0, i = tasaMV(d);
+    if (s <= 0 || !(c > 0)) return null;
+    if (i > 0 && c <= s * i) return { noCubre: true, interesMes: s * i };
+    const n = i > 0 ? Math.ceil(-Math.log(1 - i * s / c) / Math.log(1 + i)) : Math.ceil(s / c);
+    return { meses: n, fin: shiftMonth(today().slice(0, 7), n), intereses: Math.max(0, n * c - s) };
+  }
+  function ahorroPromedio() {
+    const ms = [1, 2, 3].map(i => resumenMes(shiftMonth(today().slice(0, 7), -i))).filter(r => r.ing || r.gas);
+    return ms.length ? ms.reduce((s, r) => s + r.neto, 0) / ms.length : null;
+  }
+  function estadoMeta(m) {
+    const obj = Number(m.objetivo) || 0, ini = Number(m.aportadoInicial) || 0;
+    const ap = ini + (m.aportes || []).reduce((s, a) => s + (Number(a.monto) || 0), 0);
+    const falta = Math.max(0, obj - ap), pct = obj ? Math.min(1, ap / obj) : 0;
+    const mesesRest = m.fechaLimite ? Math.max(1, monthsBetween(today().slice(0, 7), m.fechaLimite.slice(0, 7))) : null;
+    let atrasada = false;
+    if (m.fechaLimite && m.creado && falta > 0) {
+      const t0 = new Date(m.creado), t1 = new Date(m.fechaLimite + "T12:00:00");
+      const frac = Math.min(1, Math.max(0, (Date.now() - t0) / (t1 - t0)));
+      atrasada = frac > 0.05 && ap < (ini + (obj - ini) * frac) * 0.9;
+    }
+    return { obj, ap, falta, pct, mesesRest, porMes: mesesRest ? falta / mesesRest : null, atrasada, vencida: !!m.fechaLimite && m.fechaLimite < today() && falta > 0, lograda: obj > 0 && falta <= 0 };
+  }
+
+  // Formulario genérico
+  let formCfg = null;
+  function openForm(cfg) {
+    formCfg = cfg;
+    $("genTitle").textContent = cfg.title;
+    $("genIntro").textContent = cfg.intro || ""; $("genIntro").hidden = !cfg.intro;
+    $("genFields").innerHTML = cfg.fields.map(f => {
+      const id = "g_" + f.id, val = f.value ?? "", cls = f.full ? "full" : "";
+      if (f.type === "select") return `<label class="f ${cls}">${esc(f.label)} <select id="${id}">${f.options.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(val) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>`;
+      const type = f.type === "date" ? "date" : f.type === "number" ? "number" : "text";
+      const extra = (f.type === "money" || f.type === "pct" ? ' inputmode="decimal"' : "") + (f.type === "number" ? ` min="${f.min ?? ""}" max="${f.max ?? ""}"` : "");
+      return `<label class="f ${cls}">${esc(f.label)} <input id="${id}" type="${type}"${extra} value="${esc(val)}" placeholder="${esc(f.placeholder || "")}" autocomplete="off"></label>`;
+    }).join("");
+    $("genDel").hidden = !cfg.del; $("genDel").textContent = "Eliminar"; $("genDel").dataset.confirm = "";
+    $("genErr").textContent = ""; $("genSave").textContent = cfg.saveLabel || "Guardar";
+    $("genDlg").showModal();
+    setTimeout(() => $("genFields").querySelector("input,select")?.focus(), 30);
+  }
+  async function saveForm(ev) {
+    ev.preventDefault();
+    const v = {};
+    for (const f of formCfg.fields) {
+      const raw = $("g_" + f.id).value.trim();
+      if (f.required && raw === "") { $("genErr").textContent = `Completa “${f.label}”.`; return }
+      if (f.type === "money" || f.type === "pct" || f.type === "number") {
+        v[f.id] = raw === "" ? null : f.type === "money" ? parseAmount(raw) : Number(raw.replace(",", "."));
+        if (v[f.id] != null && Number.isNaN(v[f.id])) { $("genErr").textContent = `“${f.label}” debe ser un número.`; return }
+      } else v[f.id] = raw;
+    }
+    $("genSave").disabled = true;
+    try { const err = await formCfg.save(v); if (err) $("genErr").textContent = err; else $("genDlg").close() }
+    catch (e) { $("genErr").textContent = writeErr(e) }
+    finally { $("genSave").disabled = false }
+  }
+
+  function openPresupuestos(sugerir) {
+    const sug = sugerir ? sugerencias() : {};
+    if (sugerir && !Object.keys(sug).length) { toast("Necesito al menos un mes anterior con gastos para sugerir"); return }
+    const cats = catsPresupuesto();
+    openForm({
+      title: sugerir ? "Presupuesto sugerido" : "Presupuesto mensual",
+      intro: sugerir ? "Promedio de tus últimos 3 meses, con 20% menos en lo prescindible. Ajusta lo que quieras y guarda." : "Tope mensual por categoría. Deja en blanco las que no quieras controlar.",
+      fields: cats.map(c => ({ id: "p_" + slug(c), label: c, type: "money", value: sugerir ? (sug[c] ?? "") : (presDe(c)?.tope ?? "") })),
+      save: async (v) => {
+        for (const c of cats) { const x = v["p_" + slug(c)]; if (x != null && !(x > 0)) return `El tope de ${c} debe ser mayor que cero.` }
+        for (const c of cats) {
+          const x = v["p_" + slug(c)], ex = presDe(c);
+          if (x == null) { if (ex) await del("pres", ex.id); continue }
+          if (!ex || ex.tope !== x) await put("pres", ex?.id || slug(c), { categoria: c, tope: x, ...(ex?.ejemplo ? { ejemplo: true } : {}) });
+        }
+        toast("Presupuesto guardado");
+      }
+    });
+  }
+
+  function openDeuda(d, tipo) {
+    tipo = d?.tipo || tipo || "debo";
+    const debo = tipo === "debo";
+    const fields = [
+      { id: "contraparte", label: debo ? "¿A quién le debes?" : "¿Quién te debe?", type: "text", value: d?.contraparte || "", required: true, placeholder: debo ? "Ej: Banco, cooperativa, familiar" : "Ej: Andrés" },
+      { id: "concepto", label: "Concepto", type: "text", value: d?.concepto || "", placeholder: debo ? "Ej: Crédito libre inversión" : "Ej: Préstamo para el arriendo" },
+      { id: "monto", label: debo ? "Monto total que debes" : "Monto prestado", type: "money", value: d?.monto ?? "", required: true },
+      { id: "fecha", label: "Fecha del préstamo", type: "date", value: d?.fecha || today() },
+      { id: "cuota", label: "Cuota mensual (opcional)", type: "money", value: d?.cuota || "" },
+      { id: "diaPago", label: "Día de pago cada mes (opcional)", type: "number", min: 1, max: 31, value: d?.diaPago || "" },
+      { id: "vencimiento", label: "Fecha límite (opcional)", type: "date", value: d?.vencimiento || "" },
+      { id: "tasaEA", label: "Tasa de interés E.A. % (opcional)", type: "pct", value: d?.tasaEA ? String(d.tasaEA).replace(".", ",") : "" },
+    ];
+    if (!d) fields.push({ id: "cuenta", label: debo ? "¿El dinero entró a una de tus cuentas?" : "¿De qué cuenta salió el dinero?", type: "select", full: true, value: "", options: [["", "No afectar mis cuentas (es una deuda anterior)"], ...ctasNoTarjeta().map(c => [c.id, c.nombre])] });
+    openForm({
+      title: d ? "Editar " + (debo ? "deuda" : "préstamo") : debo ? "Nueva deuda" : "Nuevo préstamo por cobrar",
+      intro: debo ? "Créditos, préstamos de familiares o cualquier dinero que debas. Las tarjetas se manejan en su propia pestaña." : "Dinero que prestaste y te deben devolver.",
+      fields,
+      save: async (v) => {
+        if (!(v.monto > 0)) return "El monto debe ser mayor que cero.";
+        if (v.diaPago != null && !(v.diaPago >= 1 && v.diaPago <= 31)) return "El día de pago debe estar entre 1 y 31.";
+        if (v.tasaEA != null && !(v.tasaEA >= 0 && v.tasaEA <= 200)) return "La tasa debe estar entre 0 y 200.";
+        const data = { tipo, contraparte: v.contraparte, concepto: v.concepto, monto: v.monto, fecha: v.fecha || today(), cuota: v.cuota || 0, diaPago: v.diaPago || 0, vencimiento: v.vencimiento || "", tasaEA: v.tasaEA || 0, pagos: d?.pagos || [], creado: d?.creado || Date.now(), ...(d?.ejemplo ? { ejemplo: true } : {}), ...(d?.movId ? { movId: d.movId } : {}) };
+        if (!d && v.cuenta) {
+          const c = cuentaById(v.cuenta), movId = uid();
+          await put("movs", movId, { tipo: debo ? "ingreso" : "gasto", monto: v.monto, fecha: data.fecha, cuentaId: c.id, moneda: c.moneda, categoria: debo ? "Préstamo recibido" : "Préstamo otorgado", nota: (debo ? "Préstamo de " : "Préstamo a ") + v.contraparte, prescindible: false, deducible: false, creado: Date.now() });
+          data.movId = movId;
+        }
+        await put("deudas", d?.id || uid(), data);
+        toast(d ? "Cambios guardados" : debo ? "Deuda registrada" : "Préstamo registrado");
+      },
+      del: d ? async () => { await del("deudas", d.id); toast("Eliminado. Los movimientos asociados siguen en tus cuentas.") } : null
+    });
+  }
+  function openAbono(d) {
+    const debo = d.tipo === "debo", s = saldoDeuda(d), sug = Math.round(Math.min(s, Number(d.cuota) || s));
+    openForm({
+      title: debo ? `Abono a ${d.contraparte}` : `Cobro a ${d.contraparte}`,
+      intro: `Saldo pendiente: ${money(s)}.`,
+      saveLabel: debo ? "Registrar abono" : "Registrar cobro",
+      fields: [
+        { id: "monto", label: "Monto", type: "money", value: sug || "", required: true },
+        { id: "fecha", label: "Fecha", type: "date", value: today(), required: true },
+        { id: "cuenta", label: debo ? "¿Desde qué cuenta pagaste?" : "¿A qué cuenta entró?", type: "select", full: true, value: ctasNoTarjeta()[0]?.id || "", options: [["", "No afectar mis cuentas"], ...ctasNoTarjeta().map(c => [c.id, c.nombre])] },
+      ],
+      save: async (v) => {
+        if (!(v.monto > 0)) return "El monto debe ser mayor que cero.";
+        if (v.monto > s + 1) return `El monto supera el saldo pendiente (${money(s)}).`;
+        const pago = { id: uid(), fecha: v.fecha, monto: v.monto };
+        if (v.cuenta) {
+          const c = cuentaById(v.cuenta), movId = uid();
+          await put("movs", movId, { tipo: debo ? "gasto" : "ingreso", monto: v.monto, fecha: v.fecha, cuentaId: c.id, moneda: c.moneda, categoria: debo ? "Cuotas de deudas" : "Cobro de préstamo", nota: (debo ? "Abono a " : "Cobro a ") + d.contraparte, prescindible: false, deducible: false, creado: Date.now(), ...(d.ejemplo ? { ejemplo: true } : {}) });
+          pago.cuentaId = c.id; pago.movId = movId;
+        }
+        const { id, ...rest } = d, pagos = [...(d.pagos || []), pago];
+        await put("deudas", id, { ...rest, pagos });
+        toast(saldoDeuda({ ...d, pagos }) <= 0 ? (debo ? "¡Deuda saldada!" : "¡Préstamo cobrado completo!") : debo ? "Abono registrado" : "Cobro registrado");
+      }
+    });
+  }
+  async function quitarPago(deudaId, pagoId) {
+    const d = S.deudas.find(x => x.id === deudaId); if (!d) return;
+    const p = (d.pagos || []).find(x => x.id === pagoId);
+    const { id, ...rest } = d;
+    try {
+      await put("deudas", id, { ...rest, pagos: (d.pagos || []).filter(x => x.id !== pagoId) });
+      if (p?.movId && S.movs.some(m => m.id === p.movId)) await del("movs", p.movId);
+      toast("Pago eliminado");
+    } catch (e) { toast(writeErr(e)) }
+  }
+  function openMeta(m) {
+    openForm({
+      title: m ? "Editar meta" : "Nueva meta de ahorro",
+      fields: [
+        { id: "nombre", label: "Nombre", type: "text", value: m?.nombre || "", required: true, full: true, placeholder: "Ej: Fondo de emergencia, viaje, cuota inicial" },
+        { id: "objetivo", label: "¿Cuánto necesitas?", type: "money", value: m?.objetivo ?? "", required: true },
+        { id: "aportadoInicial", label: "¿Cuánto tienes ya?", type: "money", value: m?.aportadoInicial ?? "" },
+        { id: "fechaLimite", label: "¿Para cuándo? (opcional)", type: "date", value: m?.fechaLimite || "", full: true },
+      ],
+      save: async (v) => {
+        if (!(v.objetivo > 0)) return "El valor de la meta debe ser mayor que cero.";
+        if (v.aportadoInicial != null && v.aportadoInicial < 0) return "Lo que ya tienes no puede ser negativo.";
+        if (v.fechaLimite && v.fechaLimite <= today()) return "La fecha de la meta debe ser futura.";
+        await put("metas", m?.id || uid(), { nombre: v.nombre, objetivo: v.objetivo, aportadoInicial: v.aportadoInicial || 0, fechaLimite: v.fechaLimite || "", aportes: m?.aportes || [], creado: m?.creado || Date.now(), ...(m?.ejemplo ? { ejemplo: true } : {}) });
+        toast(m ? "Meta actualizada" : "Meta creada");
+      },
+      del: m ? async () => { await del("metas", m.id); toast("Meta eliminada") } : null
+    });
+  }
+  function openAporte(m) {
+    const e = estadoMeta(m);
+    openForm({
+      title: `Aporte a ${m.nombre}`,
+      intro: `Te faltan ${money(e.falta)}.${e.porMes ? ` Lo ideal este mes: ${money(e.porMes)}.` : ""}`,
+      saveLabel: "Registrar aporte",
+      fields: [
+        { id: "monto", label: "Monto", type: "money", value: e.porMes ? Math.round(Math.min(e.porMes, e.falta)) : "", required: true },
+        { id: "fecha", label: "Fecha", type: "date", value: today(), required: true },
+      ],
+      save: async (v) => {
+        if (!(v.monto > 0)) return "El monto debe ser mayor que cero.";
+        const { id, ...rest } = m, aportes = [...(m.aportes || []), { id: uid(), fecha: v.fecha, monto: v.monto }];
+        await put("metas", id, { ...rest, aportes });
+        toast(estadoMeta({ ...m, aportes }).lograda ? "¡Meta lograda!" : "Aporte registrado");
+      }
+    });
+  }
+
+  function regla503020(r) {
+    if (!r.ing) return `<p class="hint" style="margin:0">Registra tus ingresos del mes para compararlos con la regla 50/30/20.</p>`;
+    let nec = 0, gus = 0;
+    for (const [c, v] of Object.entries(r.porCat)) ESENCIAL[c] === false ? (gus += v) : (nec += v);
+    const items = [["Necesidades", nec / r.ing, .5, "máx."], ["Gustos", gus / r.ing, .3, "máx."], ["Ahorro", (r.ing - r.gas) / r.ing, .2, "mín."]];
+    return `<div class="card-stats" style="margin:0">${items.map(([n, v, t, k], i) => { const ok = i < 2 ? v <= t : v >= t; return `<div><span class="lbl">${n}</span><span class="v num ${ok ? "pos" : "neg"}">${Math.round(v * 100)}%</span><span class="hint">Meta: ${k} ${t * 100}%</span></div>` }).join("")}<div><span class="lbl">Ingresos</span><span class="v num">${money(r.ing)}</span></div></div>`;
+  }
+  function vPresupuestos() {
+    if (!S.cuentas.length) return emptyStart();
+    const r = resumenMes(S.month), av = avanceMes(S.month), enCurso = av > 0 && av < 1;
+    const head = `<section class="panel"><div class="panel-head"><h2>Regla 50/30/20</h2><span class="hint">Sobre tus ingresos del mes</span></div>${regla503020(r)}</section>`;
+    if (!S.pres.length) return head + `<section class="panel empty"><h2>Ponle tope a tus gastos</h2><p>Define cuánto quieres gastar al mes en cada categoría y te aviso cuando te acerques al límite.</p><div class="row"><button class="btn primary" data-act="edit-pres">Crear presupuesto</button><button class="btn" data-act="suggest-pres">Sugerir según mis gastos</button></div></section>`;
+    const rows = S.pres.map(p => ({ p, g: r.porCat[p.categoria] || 0 })).sort((a, b) => b.g / b.p.tope - a.g / a.p.tope);
+    const totT = rows.reduce((s, x) => s + x.p.tope, 0), totG = rows.reduce((s, x) => s + x.g, 0);
+    const semanas = Math.max(1, Math.ceil((1 - av) * daysIn(S.month) / 7));
+    const sinP = Object.entries(r.porCat).filter(([c]) => !presDe(c)).sort((a, b) => b[1] - a[1]);
+    return head + `<section class="panel">
+      <div class="panel-head"><h2>Presupuesto del mes</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" data-act="suggest-pres">Sugerir</button><button class="btn small primary" data-act="edit-pres">Editar topes</button></div></div>
+      <div class="card-stats" style="margin:0 0 18px">
+        <div><span class="lbl">Presupuestado</span><span class="v num">${money(totT)}</span></div>
+        <div><span class="lbl">Gastado</span><span class="v num ${totG > totT ? "neg" : ""}">${money(totG)}</span></div>
+        <div><span class="lbl">Disponible</span><span class="v num ${totT - totG < 0 ? "neg" : "pos"}">${money(totT - totG)}</span></div>
+        <div><span class="lbl">Mes transcurrido</span><span class="v num">${Math.round(av * 100)}%</span>${enCurso ? `<span class="hint">La raya en cada barra marca hoy</span>` : ""}</div>
+      </div>
+      <div class="cats">${rows.map(({ p, g }) => {
+        const u = g / p.tope, cls = u > 1 ? "bad" : u >= .8 ? "warn" : "ok";
+        const st = u > 1 ? ["bad", "Excedido"] : u >= .8 ? ["warn", "Cerca del tope"] : enCurso && u > av + .15 ? ["warn", "Ritmo alto"] : ["ok", "En orden"];
+        const nota = g > p.tope ? `Te pasaste ${money(g - p.tope)}` : `Te quedan ${money(p.tope - g)}${enCurso && p.tope - g > 0 ? ` · unos ${money((p.tope - g) / semanas)} por semana` : ""}`;
+        return `<div class="cat-row"><span>${esc(p.categoria)} <span class="pill ${st[0]}">${st[1]}</span>${p.ejemplo ? '<span class="tag ex">ejemplo</span>' : ""}</span><span class="num">${money(g)} <span class="hint">de ${compact(p.tope)}</span></span>
+          <div class="bar budget"><b class="${cls}" style="width:${Math.min(100, Math.max(1, u * 100))}%"></b>${enCurso ? `<i style="left:${av * 100}%"></i>` : ""}</div>
+          <span class="hint" style="grid-column:1/-1">${nota}</span></div>`;
+      }).join("")}</div>
+      ${sinP.length ? `<h3 style="font-size:.9rem;margin-top:20px">Gastos sin presupuesto</h3><div class="cats" style="margin-top:8px">${sinP.map(([c, v]) => `<div class="cat-row"><span>${esc(c)}</span><span class="num">${money(v)}</span></div>`).join("")}</div>` : ""}
+    </section>`;
+  }
+
+  function deudaCard(d) {
+    const s = saldoDeuda(d), pagado = (Number(d.monto) || 0) - s, f = proxFechaDeuda(d), dias = f ? diasHasta(f) : null;
+    const debo = d.tipo === "debo", pl = debo ? plazoDeuda(d) : null;
+    const st = s <= 0 ? ["ok", debo ? "Saldada" : "Cobrada"] : dias != null && dias < 0 ? ["bad", "Vencida"] : dias != null && dias <= 5 ? ["warn", dias === 0 ? "Vence hoy" : `En ${dias} días`] : ["", "Al día"];
+    const info = [f ? `${dias < 0 ? (debo ? "Pago atrasado desde" : "Cobro pendiente desde") : `Próximo ${debo ? "pago" : "cobro"}:`} ${fechaCorta(f)}` : "", d.cuota ? `Cuota ${money(d.cuota)}` : "", d.tasaEA ? `${String(d.tasaEA).replace(".", ",")}% E.A.` : ""].filter(Boolean).join(" · ");
+    const pagos = [...(d.pagos || [])].sort((a, b) => b.fecha.localeCompare(a.fecha));
+    return `<div class="acc">
+      <div class="top2"><span class="name">${esc(d.contraparte)}${d.ejemplo ? '<span class="tag ex">ejemplo</span>' : ""}</span><span class="pill ${st[0]}">${st[1]}</span></div>
+      ${d.concepto ? `<span class="hint">${esc(d.concepto)}</span>` : ""}
+      <span class="bal num ${debo && s > 0 ? "neg" : ""}">${money(s)}</span>
+      <div class="use" style="margin-top:0"><b style="width:${Math.max(1, Math.min(100, pagado / (d.monto || 1) * 100))}%"></b></div>
+      <span class="hint num">${debo ? "Pagado" : "Recibido"} ${money(pagado)} de ${money(d.monto)}</span>
+      ${info ? `<span class="hint">${info}</span>` : ""}
+      ${pl?.noCubre ? `<span class="hint neg">La cuota no alcanza a cubrir los intereses (unos ${money(pl.interesMes)} al mes).</span>` : pl?.meses ? `<span class="hint">Terminas en ${pl.meses} ${pl.meses === 1 ? "mes" : "meses"} (${monthName(pl.fin)})${pl.intereses > 0 ? ` · intereses aprox. ${money(pl.intereses)}` : ""}</span>` : ""}
+      <div class="row" style="flex-wrap:wrap">${s > 0 ? `<button class="btn small primary" data-abono="${d.id}">${debo ? "Abonar" : "Registrar cobro"}</button>` : ""}<button class="btn small" data-edit-deuda="${d.id}">Editar</button>${pagos.length ? `<button class="btn small" data-hist="${d.id}">${S.histOpen === d.id ? "Ocultar pagos" : `Pagos (${pagos.length})`}</button>` : ""}</div>
+      ${S.histOpen === d.id ? `<div class="cats" style="margin-top:6px">${pagos.map(p => `<div class="cat-row" style="align-items:center"><span class="hint">${fechaCorta(p.fecha)} ${p.fecha.slice(0, 4)}${p.movId ? " · en cuentas" : ""}</span><span class="num">${money(p.monto)} <button class="btn small danger" data-del-pago="${d.id}|${p.id}">Quitar</button></span></div>`).join("")}</div>` : ""}
+    </div>`;
+  }
+  function vEstrategia() {
+    const items = [
+      ...S.deudas.filter(d => d.tipo === "debo" && saldoDeuda(d) > 0).map(d => ({ n: d.contraparte + (d.concepto ? " · " + d.concepto : ""), s: saldoDeuda(d), t: Number(d.tasaEA) || 0 })),
+      ...S.cuentas.filter(isCard).map(c => ({ n: c.nombre, s: estadoTarjeta(c).deuda, t: Number(c.tasaEA) || 0 })).filter(x => x.s > 0)];
+    if (items.length < 2) return "";
+    const bola = S.estrategia === "bola";
+    items.sort((a, b) => bola ? a.s - b.s : (b.t - a.t) || (a.s - b.s));
+    return `<section class="panel"><div class="panel-head"><h2>Orden recomendado para pagar</h2>
+        <div class="seg" style="grid-template-columns:1fr 1fr;width:min(300px,100%)"><button type="button" data-estr="avalancha" aria-pressed="${!bola}">Avalancha</button><button type="button" data-estr="bola" aria-pressed="${bola}">Bola de nieve</button></div></div>
+      <p class="hint" style="margin:0 0 12px">${bola ? "Primero la deuda más pequeña: cierras deudas rápido y ganas impulso." : "Primero la de mayor interés: así pagas menos intereses en total."} Paga el mínimo en todas y todo el dinero extra a la número 1. Incluye tus tarjetas.</p>
+      <div class="tbl-wrap" style="margin:0"><table class="tbl"><thead><tr><th>Orden</th><th>Deuda</th><th class="r">Saldo</th><th class="r">Tasa E.A.</th></tr></thead><tbody>${items.map((x, i) => `<tr><td class="num">${i + 1}</td><td>${esc(x.n)}</td><td class="r num">${money(x.s)}</td><td class="r num">${x.t ? String(x.t).replace(".", ",") + "%" : "—"}</td></tr>`).join("")}</tbody></table></div></section>`;
+  }
+  function vDeudas() {
+    const debo = S.deudas.filter(d => d.tipo === "debo"), meDeben = S.deudas.filter(d => d.tipo === "me_deben");
+    const byState = (a, b) => (saldoDeuda(a) <= 0) - (saldoDeuda(b) <= 0) || (proxFechaDeuda(a) || "9").localeCompare(proxFechaDeuda(b) || "9");
+    debo.sort(byState); meDeben.sort(byState);
+    const tDebo = debo.reduce((s, d) => s + saldoDeuda(d), 0), tMe = meDeben.reduce((s, d) => s + saldoDeuda(d), 0);
+    const tTarj = S.cuentas.filter(isCard).reduce((s, c) => s + estadoTarjeta(c).deuda, 0);
+    const cuotas = debo.reduce((s, d) => s + (saldoDeuda(d) > 0 ? Number(d.cuota) || 0 : 0), 0);
+    const ingProm = (() => { const ms = [1, 2, 3].map(i => resumenMes(shiftMonth(today().slice(0, 7), -i)).ing).filter(Boolean); return ms.length ? ms.reduce((a, b) => a + b, 0) / ms.length : 0 })();
+    const carga = ingProm ? cuotas / ingProm : null;
+    return `<section class="kpis">
+        <div class="kpi"><span class="lbl">Debo en préstamos</span><span class="val num ${tDebo ? "neg" : ""}">${money(tDebo)}</span><span class="sub">${debo.filter(d => saldoDeuda(d) > 0).length} activas</span></div>
+        <div class="kpi"><span class="lbl">Debo en tarjetas</span><span class="val num ${tTarj ? "neg" : ""}">${money(tTarj)}</span><span class="sub">Detalle en Tarjetas</span></div>
+        <div class="kpi"><span class="lbl">Me deben</span><span class="val num ${tMe ? "pos" : ""}">${money(tMe)}</span><span class="sub">${meDeben.filter(d => saldoDeuda(d) > 0).length} por cobrar</span></div>
+        <div class="kpi"><span class="lbl">Cuotas al mes</span><span class="val num">${money(cuotas)}</span><span class="sub ${carga > .35 ? "neg" : ""}">${carga == null ? "Sin ingresos para comparar" : `${Math.round(carga * 100)}% de tus ingresos${carga > .35 ? " · muy alto (sano: <30%)" : ""}`}</span></div>
+      </section>
+      <section class="panel"><div class="panel-head"><h2>Lo que debo</h2><button class="btn small primary" data-act="new-debo">+ Agregar deuda</button></div>
+        ${debo.length ? `<div class="accounts">${debo.map(deudaCard).join("")}</div>` : `<p class="hint" style="margin:0">No tienes préstamos registrados. Agrega créditos, préstamos de familiares o cualquier dinero que debas.</p>`}</section>
+      <section class="panel"><div class="panel-head"><h2>Lo que me deben</h2><button class="btn small primary" data-act="new-medeben">+ Agregar préstamo</button></div>
+        ${meDeben.length ? `<div class="accounts">${meDeben.map(deudaCard).join("")}</div>` : `<p class="hint" style="margin:0">Nadie te debe dinero por ahora. Registra aquí lo que prestes para no olvidar cobrarlo.</p>`}</section>
+      ${vEstrategia()}`;
+  }
+  function vMetas() {
+    if (!S.metas.length) return `<section class="panel empty"><h2>Define tu primera meta</h2><p>Fondo de emergencia, viaje, cuota inicial de vivienda… Te digo cuánto apartar cada mes y si vas a tiempo.</p><div class="row"><button class="btn primary" data-act="new-meta">Crear meta</button></div></section>`;
+    const prom = ahorroPromedio(), est = S.metas.map(m => [m, estadoMeta(m)]);
+    est.sort((a, b) => a[1].lograda - b[1].lograda || (a[0].fechaLimite || "9").localeCompare(b[0].fechaLimite || "9"));
+    const nec = est.reduce((s, [, e]) => s + (e.lograda ? 0 : e.porMes || 0), 0);
+    const lbl = { lograda: ["ok", "Lograda"], vencida: ["bad", "Fecha vencida"], atrasada: ["warn", "Atrasada"], ok: ["ok", "A tiempo"], libre: ["", "Sin fecha"] };
+    return `<section class="panel"><div class="panel-head"><h2>Metas de ahorro</h2><button class="btn small primary" data-act="new-meta">+ Nueva meta</button></div>
+      <p class="hint" style="margin:0 0 14px">${nec ? `Para cumplir tus metas a tiempo necesitas apartar <b class="num">${money(nec)}</b> al mes.` : ""}${prom != null ? ` Tu ahorro promedio de los últimos 3 meses es <b class="num">${money(prom)}</b>${nec ? (prom >= nec ? ": te alcanza." : `: te faltan ${money(nec - prom)} al mes. Revisa tus gastos prescindibles en Presupuestos.`) : "."}` : ""}</p>
+      <div class="accounts">${est.map(([m, e]) => {
+        const st = lbl[e.lograda ? "lograda" : e.vencida ? "vencida" : e.atrasada ? "atrasada" : m.fechaLimite ? "ok" : "libre"];
+        return `<div class="acc"><div class="top2"><span class="name">${esc(m.nombre)}${m.ejemplo ? '<span class="tag ex">ejemplo</span>' : ""}</span><span class="pill ${st[0]}">${st[1]}</span></div>
+          <span class="bal num">${money(e.ap)}</span>
+          <div class="use" style="margin-top:0"><b style="width:${Math.max(1, e.pct * 100)}%"></b></div>
+          <span class="hint num">${Math.round(e.pct * 100)}% de ${money(e.obj)}${m.fechaLimite ? ` · para el ${fechaCorta(m.fechaLimite)} ${m.fechaLimite.slice(0, 4)}` : ""}</span>
+          ${!e.lograda && e.porMes ? `<span class="hint">Aparta <b class="num">${money(e.porMes)}</b> al mes durante ${e.mesesRest} ${e.mesesRest === 1 ? "mes" : "meses"}.</span>` : ""}
+          ${!e.lograda && !m.fechaLimite && prom > 0 ? `<span class="hint">Con tu ahorro promedio la logras en unos ${Math.ceil(e.falta / prom)} meses.</span>` : ""}
+          <div class="row">${!e.lograda ? `<button class="btn small primary" data-aporte="${m.id}">Aportar</button>` : ""}<button class="btn small" data-edit-meta="${m.id}">Editar</button></div></div>`;
+      }).join("")}</div></section>`;
   }
 
   // ---------- Diálogo de movimientos ----------
@@ -832,6 +1193,14 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     try {
       for (const a of [a1, a2, a3]) { const { id, ...d } = a; await put("cuentas", id, d) }
       for (const r of rows) { const { id, ...d } = r; await put("movs", id, d) }
+      for (const [c, tope] of [["Mercado", 650000], ["Domicilios", 200000], ["Restaurantes", 150000], ["Transporte", 200000], ["Servicios", 280000], ["Suscripciones", 50000]])
+        await put("pres", "ex-" + slug(c), { categoria: c, tope, ...ex });
+      const tm = today().slice(0, 7), en3 = new Date(Date.now() + 3 * 864e5);
+      const en3s = ym(en3) + "-" + String(en3.getDate()).padStart(2, "0");
+      await put("deudas", "ex-d1", { tipo: "debo", contraparte: "Banco", concepto: "Crédito libre inversión", monto: 5000000, fecha: `${m2}-01`, cuota: 280000, diaPago: 10, vencimiento: "", tasaEA: 22, pagos: [{ id: "p1", fecha: `${m2}-10`, monto: 280000 }, { id: "p2", fecha: `${m1}-10`, monto: 280000 }], creado: now, ...ex });
+      await put("deudas", "ex-d2", { tipo: "me_deben", contraparte: "Andrés", concepto: "Préstamo para el arriendo", monto: 400000, fecha: `${m1}-05`, cuota: 0, diaPago: 0, vencimiento: en3s, tasaEA: 0, pagos: [{ id: "p3", fecha: `${m1}-25`, monto: 100000 }], creado: now + 1, ...ex });
+      await put("metas", "ex-g1", { nombre: "Fondo de emergencia", objetivo: 12000000, aportadoInicial: 2000000, fechaLimite: dayOf(shiftMonth(tm, 12), 1), aportes: [{ id: "a1", fecha: `${m2}-02`, monto: 500000 }, { id: "a2", fecha: `${m1}-02`, monto: 500000 }], creado: new Date(m2 + "-01T12:00:00").getTime(), ...ex });
+      await put("metas", "ex-g2", { nombre: "Viaje de fin de año", objetivo: 3000000, aportadoInicial: 0, fechaLimite: dayOf(shiftMonth(tm, 2), 15), aportes: [{ id: "a3", fecha: `${m1}-02`, monto: 300000 }], creado: new Date(m1 + "-01T12:00:00").getTime(), ...ex });
       toast("Datos de ejemplo cargados");
     } catch (e) { toast(writeErr(e)) }
   }
@@ -839,6 +1208,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     try {
       for (const m of S.movs.filter(x => x.ejemplo)) await del("movs", m.id);
       for (const c of S.cuentas.filter(x => x.ejemplo)) await del("cuentas", c.id);
+      for (const k of ["pres", "deudas", "metas"]) for (const x of S[k].filter(x => x.ejemplo)) await del(k, x.id);
       toast("Ejemplos eliminados");
     } catch (e) { toast(writeErr(e)) }
   }
@@ -849,7 +1219,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   $("nextM").onclick = () => { S.month = shiftMonth(S.month, 1); render() };
   $("fab").onclick = () => openMov();
   $("view").addEventListener("click", e => {
-    const t = e.target.closest("[data-act],[data-mov],[data-edit-acc],[data-filter-acc],[data-tab-go],[data-pay-card]"); if (!t) return;
+    const t = e.target.closest("button"); if (!t) return;
+    const ds = t.dataset;
+    if (ds.abono) return openAbono(S.deudas.find(d => d.id === ds.abono));
+    if (ds.editDeuda) return openDeuda(S.deudas.find(d => d.id === ds.editDeuda));
+    if (ds.hist) { S.histOpen = S.histOpen === ds.hist ? null : ds.hist; return render() }
+    if (ds.delPago) { if (!ds.confirm) { ds.confirm = "1"; t.textContent = "¿Seguro?"; return } const [a, b] = ds.delPago.split("|"); return quitarPago(a, b) }
+    if (ds.estr) { S.estrategia = ds.estr; return render() }
+    if (ds.aporte) return openAporte(S.metas.find(m => m.id === ds.aporte));
+    if (ds.editMeta) return openMeta(S.metas.find(m => m.id === ds.editMeta));
     if (t.dataset.payCard) return openPago(t.dataset.payCard);
     if (t.dataset.mov) return openMov(S.movs.find(m => m.id === t.dataset.mov));
     if (t.dataset.editAcc) return openAcc(cuentaById(t.dataset.editAcc));
@@ -858,6 +1236,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     const a = t.dataset.act;
     if (a === "new-acc") openAcc();
     else if (a === "new-card") openAcc(null, "tarjeta");
+    else if (a === "edit-pres") openPresupuestos(false);
+    else if (a === "suggest-pres") openPresupuestos(true);
+    else if (a === "new-debo") openDeuda(null, "debo");
+    else if (a === "new-medeben") openDeuda(null, "me_deben");
+    else if (a === "new-meta") openMeta();
     else if (a === "new-mov") openMov();
     else if (a === "seed") seed();
     else if (a === "unseed") unseed();
@@ -877,6 +1260,13 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   $("fCuenta").addEventListener("change", syncDest);
   $("fDest").addEventListener("change", syncDest);
   $("movForm").addEventListener("submit", saveMov);
+  $("genForm").addEventListener("submit", saveForm);
+  for (const id of ["genClose", "genCancel"]) $(id).onclick = () => $("genDlg").close();
+  $("genDel").onclick = async (e) => {
+    const b = e.currentTarget;
+    if (!b.dataset.confirm) { b.dataset.confirm = "1"; b.textContent = "¿Eliminar? Toca otra vez"; return }
+    try { await formCfg.del(); $("genDlg").close() } catch (err) { $("genErr").textContent = writeErr(err) }
+  };
   $("accForm").addEventListener("submit", saveAcc);
   for (const id of ["movClose", "movCancel"]) $(id).onclick = () => $("movDlg").close();
   for (const id of ["accClose", "accCancel"]) $(id).onclick = () => $("accDlg").close();
