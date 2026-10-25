@@ -756,7 +756,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
   // ---------- Fase 2: presupuestos, deudas y metas ----------
   // Movimientos de préstamos: mueven dinero pero no son ingreso ni gasto del mes
   const NEUTRAL = new Set(["Préstamo recibido", "Préstamo otorgado", "Cobro de préstamo"]);
-  function slug(s) { return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") }
+  function slug(s) { return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") }
   const presDe = (cat) => S.pres.find(p => p.categoria === cat);
   const catsPresupuesto = () => CATS.gasto.map(([c]) => c).filter(c => !NEUTRAL.has(c));
   const ctasNoTarjeta = () => S.cuentas.filter(c => !isCard(c));
@@ -1082,7 +1082,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     const t = S.config.tasas?.[moneda] ?? (moneda === "USD" ? S.config.tasaUSD : moneda === "EUR" ? 4400 : 0);
     return Number(t) || 0;
   }
-  function norm(s) { return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase() }
+  function norm(s) { return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase() }
 
   // Diccionario de comercios frecuentes en Colombia (texto sin tildes, en minúscula)
   const DICC_GASTO = [
@@ -1140,8 +1140,8 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
   }
   function decodeText(buf) {
     let t = new TextDecoder("utf-8").decode(buf);
-    if (t.includes("�")) t = new TextDecoder("windows-1252").decode(buf);
-    return t.replace(/^﻿/, "");
+    if (t.includes("\uFFFD")) t = new TextDecoder("windows-1252").decode(buf);
+    return t.replace(/^\uFEFF/, "");
   }
   function parseCSV(text) {
     const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 30);
