@@ -82,3 +82,10 @@ Cada fase se publica en la misma URL del artefacto y se commitea en `claude/eleg
 - "Deshacer importación" por lote desde Movimientos.
 - Multimoneda COP/USD/EUR: cada movimiento en moneda extranjera guarda su tasa; los saldos usan la tasa configurada.
 - Movimientos suscritos por año (hasta 1000 por año) para soportar historiales grandes.
+
+## Fase 4 entregada (v0.4)
+- Asesor: análisis del mes con Claude (puntaje, hallazgos con ahorro posible, plan y acción de la semana) y chat de preguntas. Solo se envían totales por categoría. Consejos automáticos sin IA siempre visibles.
+- Impuestos: topes para declarar renta en UVT (ingresos, patrimonio, consumos con tarjeta, compras, consignaciones), ingresos por categoría, impuestos y GMF pagados, donaciones con descuento estimado del 25% y gastos deducibles. UVT editable.
+- Exportar a Excel (mes o año) con hojas de movimientos, resumen mensual, deudas y metas.
+- Recordatorios en Google Calendar para pagos de tarjeta, deudas y cobros (mensuales cuando aplica, con avisos 1 día y 1 hora antes).
+- Resumen semanal por correo con una tarea programada (fuera de la página).

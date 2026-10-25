@@ -198,6 +198,22 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
 .prog b { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s }
 .rules { display: grid; gap: 6px; margin-top: 12px }
 .rules div { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--sunken); border-radius: 8px; font-size: .86rem; flex-wrap: wrap }
+.sub-h { font-size: .9rem; margin: 20px 0 10px }
+.advice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center }
+.score { width: 84px; height: 84px; border-radius: 50%; border: 6px solid var(--accent); display: grid; place-content: center; text-align: center; line-height: 1.1 }
+.score .num { font-size: 1.6rem; font-weight: 500 }
+.score .hint { font-size: .7rem }
+.plan { margin: 0; padding-left: 22px; display: grid; gap: 10px }
+.week { margin-top: 18px; padding: 14px 16px; border-radius: var(--r); background: var(--accent-soft); display: grid; gap: 4px }
+.week .lbl { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--accent) }
+.chat { display: grid; gap: 10px; margin-bottom: 12px }
+.bubble { max-width: min(640px, 92%); padding: 10px 14px; border-radius: 12px; font-size: .92rem; overflow-wrap: anywhere }
+.bubble p { margin: 0 0 8px } .bubble p:last-child { margin: 0 } .bubble ul { margin: 0 0 8px; padding-left: 18px }
+.bubble.user { justify-self: end; background: var(--accent); color: var(--accent-ink) }
+.bubble.assistant { justify-self: start; background: var(--sunken) }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px }
+.ask { display: flex; gap: 8px; flex-wrap: wrap }
+.ask input { flex: 1 1 220px; min-width: 0 }
 .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end }
 @media (prefers-reduced-motion: no-preference) { .kpi, .panel { transition: border-color .2s } }
 </style>
@@ -219,6 +235,8 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
       <button role="tab" data-tab="tarjetas" aria-selected="false">Tarjetas</button>
       <button role="tab" data-tab="deudas" aria-selected="false">Deudas</button>
       <button role="tab" data-tab="metas" aria-selected="false">Metas</button>
+      <button role="tab" data-tab="asesor" aria-selected="false">Asesor</button>
+      <button role="tab" data-tab="impuestos" aria-selected="false">Impuestos</button>
       <button role="tab" data-tab="cuentas" aria-selected="false">Cuentas</button>
     </nav>
   </div>
@@ -334,7 +352,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
   const S = {
     mode: "loading", // db | local | loading
     cuentas: [], movs: [], pres: [], deudas: [], metas: [], reglas: [], config: { tasaUSD: 4000, monedaBase: "COP", anios: [] },
-    estrategia: "avalancha", histOpen: null,
+    estrategia: "avalancha", histOpen: null, chat: [], asesor: null, iaBusy: null, iaErr: "", anioFiscal: null, agendando: null,
     tab: "resumen", month: ym(new Date()),
     filt: { tipo: "", cuenta: "", q: "" },
   };
@@ -480,9 +498,9 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
   // ---------- Almacenamiento ----------
   const LS_KEY = "mis-finanzas-local-v1";
   function loadLocal() {
-    try { const d = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (d) { S.cuentas = d.cuentas || []; S.movs = d.movs || []; S.pres = d.pres || []; S.deudas = d.deudas || []; S.metas = d.metas || []; S.reglas = d.reglas || []; S.config = { ...S.config, ...(d.config || {}) } } } catch (e) { }
+    try { const d = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (d) { S.cuentas = d.cuentas || []; S.movs = d.movs || []; S.pres = d.pres || []; S.deudas = d.deudas || []; S.metas = d.metas || []; S.reglas = d.reglas || []; S.asesor = d.asesor || null; S.config = { ...S.config, ...(d.config || {}) } } } catch (e) { }
   }
-  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ cuentas: S.cuentas, movs: S.movs, pres: S.pres, deudas: S.deudas, metas: S.metas, reglas: S.reglas, config: S.config })) } catch (e) { } }
+  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ cuentas: S.cuentas, movs: S.movs, pres: S.pres, deudas: S.deudas, metas: S.metas, reglas: S.reglas, asesor: S.asesor, config: S.config })) } catch (e) { } }
   const COL = { cuentas: "cuentas", movs: "movimientos", pres: "presupuestos", deudas: "deudas", metas: "metas", reglas: "reglas" };
 
   async function put(kind, id, data) {
@@ -504,6 +522,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
 
   async function init() {
     render();
+    cargarCapacidades();
     let cap = null;
     try { cap = window.claude?.use ? await window.claude.use("db") : null } catch (e) { cap = null }
     if (!cap) {
@@ -518,6 +537,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     S.suscribirAnios = (ys) => { for (const y of ys) { if (subs[y]) continue; subs[y] = db.collection("movimientos").where("fecha", ">=", `${y}-01-01`).where("fecha", "<=", `${y}-12-31`).limit(1000).onSnapshot(s => { porAnio[y] = withId(s); unir() }, onErr) } };
     const yNow = new Date().getFullYear();
     S.suscribirAnios([String(yNow), String(yNow - 1)]);
+    db.doc("asesor/ultimo").onSnapshot(s => { if (s.exists) { S.asesor = s.data(); scheduleRender() } }, onErr);
     db.collection("reglas").onSnapshot(s => { S.reglas = withId(s); scheduleRender() }, onErr);
     const byCreado = (a, b) => (a.creado || 0) - (b.creado || 0);
     db.collection("presupuestos").onSnapshot(s => { S.pres = withId(s); render() }, onErr);
@@ -535,8 +555,10 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     document.querySelectorAll("nav.tabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === S.tab)));
     const v = $("view");
     if (S.mode === "loading") { v.innerHTML = `<section class="panel empty"><h2>Cargando tus finanzas…</h2><p>Conectando con la base de datos.</p></section>`; return }
-    const views = { resumen: vResumen, movimientos: vMovs, presupuestos: vPresupuestos, tarjetas: vTarjetas, deudas: vDeudas, metas: vMetas, cuentas: vCuentas };
+    const views = { resumen: vResumen, movimientos: vMovs, presupuestos: vPresupuestos, tarjetas: vTarjetas, deudas: vDeudas, metas: vMetas, asesor: vAsesor, impuestos: vImpuestos, cuentas: vCuentas };
+    const ae = document.activeElement, keep = ae && v.contains(ae) && ae.id && "value" in ae ? { id: ae.id, val: ae.value, a: ae.selectionStart, b: ae.selectionEnd } : null;
     v.innerHTML = (views[S.tab] || vResumen)();
+    if (keep) { const n = document.getElementById(keep.id); if (n) { n.value = keep.val; n.focus(); try { n.setSelectionRange(keep.a, keep.b) } catch (e) { } } }
   }
 
   function vTarjetas() {
@@ -551,7 +573,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
       const prox = e.configurada ? Array.from({ length: 6 }, (_, i) => { const cm = shiftMonth(e.corteMes, i); return { f: fechaPago(c, cm), v: facturado(c, cm).total } }) : [];
       return `<section class="panel">
         <div class="card-head"><h2>${esc(c.nombre)}${c.ejemplo ? '<span class="tag ex">ejemplo</span>' : ""}</h2>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="pill ${pc}">${pt}</span><button class="btn small" data-edit-acc="${c.id}">Editar</button><button class="btn small primary" data-pay-card="${c.id}">Registrar pago</button></div></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="pill ${pc}">${pt}</span><button class="btn small" data-edit-acc="${c.id}">Editar</button>${e.configurada ? btnAgendar("card", c) : ""}<button class="btn small primary" data-pay-card="${c.id}">Registrar pago</button></div></div>
         ${e.configurada ? "" : `<p class="hint">Edita la tarjeta y agrega cupo, día de corte y día de pago para calcular tus fechas y cuotas.</p>`}
         <div class="card-stats">
           <div><span class="lbl">Deuda total</span><span class="v num neg">${money(e.deuda, c.moneda)}</span></div>
@@ -703,7 +725,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
       return `<div class="day"><h3><span>${dd}</span><span class="num">${tot >= 0 ? "+" : ""}${money(tot)}</span></h3>${ms.map(movRow).join("")}</div>`;
     }).join("") : `<div class="empty"><p>No hay movimientos con estos filtros en ${monthName(S.month)}.</p><button class="btn primary" data-act="new-mov">Registrar movimiento</button></div>`;
     return `<section class="panel">
-      <div class="panel-head"><h2>Movimientos</h2><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="hint num">+${compact(r.ing)} · −${compact(r.gas)} · ${list.length} registros</span><button class="btn small" data-act="import">Importar extracto</button></div></div>
+      <div class="panel-head"><h2>Movimientos</h2><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="hint num">+${compact(r.ing)} · −${compact(r.gas)} · ${list.length} registros</span><button class="btn small" data-act="import">Importar extracto</button>${CAP.downloads ? `<button class="btn small" data-act="export-mes">Exportar mes</button>` : ""}</div></div>
       ${(S.lleno || []).length ? `<p class="err" style="margin:0 0 12px">El año ${S.lleno.join(", ")} llegó a 1000 movimientos y no se muestran todos. Los saldos pueden no cuadrar.</p>` : ""}
       ${lotes().length ? `<div class="rules" style="margin:0 0 14px">${lotes().map(l => `<div><span>Importación: <b>${l.n}</b> movimientos del ${fechaCorta(l.desde)} al ${fechaCorta(l.hasta)}</span><button class="btn small danger" data-undo-lote="${l.id}">Deshacer</button></div>`).join("")}</div>` : ""}
       <div class="filters">
@@ -745,7 +767,8 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
       <div class="settings">
         <label class="f">1 USD en pesos <input id="cfgUSD" type="text" inputmode="decimal" value="${esc(tasaDe("USD"))}"></label>
         <label class="f">1 EUR en pesos <input id="cfgEUR" type="text" inputmode="decimal" value="${esc(tasaDe("EUR"))}"></label>
-        <button class="btn" data-act="save-cfg">Guardar tasas</button>
+        <label class="f">UVT ${today().slice(0, 4)} (DIAN) <input id="cfgUVT" type="text" inputmode="decimal" value="${esc(uvtDe(today().slice(0, 4)))}"></label>
+        <button class="btn" data-act="save-cfg">Guardar</button>
       </div>
       <p class="hint" style="margin:10px 0 0">Cada movimiento en dólares o euros guarda la tasa del día en que lo registras, así tus meses pasados no cambian. Los saldos se convierten con la tasa de aquí.</p>
       <h3 style="font-size:.9rem;margin-top:20px">Reglas de categorización</h3>
@@ -1018,7 +1041,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
       <span class="hint num">${debo ? "Pagado" : "Recibido"} ${money(pagado)} de ${money(d.monto)}</span>
       ${info ? `<span class="hint">${info}</span>` : ""}
       ${pl?.noCubre ? `<span class="hint neg">La cuota no alcanza a cubrir los intereses (unos ${money(pl.interesMes)} al mes).</span>` : pl?.meses ? `<span class="hint">Terminas en ${pl.meses} ${pl.meses === 1 ? "mes" : "meses"} (${monthName(pl.fin)})${pl.intereses > 0 ? ` · intereses aprox. ${money(pl.intereses)}` : ""}</span>` : ""}
-      <div class="row" style="flex-wrap:wrap">${s > 0 ? `<button class="btn small primary" data-abono="${d.id}">${debo ? "Abonar" : "Registrar cobro"}</button>` : ""}<button class="btn small" data-edit-deuda="${d.id}">Editar</button>${pagos.length ? `<button class="btn small" data-hist="${d.id}">${S.histOpen === d.id ? "Ocultar pagos" : `Pagos (${pagos.length})`}</button>` : ""}</div>
+      <div class="row" style="flex-wrap:wrap">${s > 0 ? `<button class="btn small primary" data-abono="${d.id}">${debo ? "Abonar" : "Registrar cobro"}</button>` : ""}<button class="btn small" data-edit-deuda="${d.id}">Editar</button>${s > 0 && f ? btnAgendar("deuda", d) : ""}${pagos.length ? `<button class="btn small" data-hist="${d.id}">${S.histOpen === d.id ? "Ocultar pagos" : `Pagos (${pagos.length})`}</button>` : ""}</div>
       ${S.histOpen === d.id ? `<div class="cats" style="margin-top:6px">${pagos.map(p => `<div class="cat-row" style="align-items:center"><span class="hint">${fechaCorta(p.fecha)} ${p.fecha.slice(0, 4)}${p.movId ? " · en cuentas" : ""}</span><span class="num">${money(p.monto)} <button class="btn small danger" data-del-pago="${d.id}|${p.id}">Quitar</button></span></div>`).join("")}</div>` : ""}
     </div>`;
   }
@@ -1410,6 +1433,263 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     await putConfig({ anios: [...cur, ...nuevos].sort() });
   }
 
+  // ---------- Fase 4: asesor, impuestos, exportación y Calendar ----------
+  const CAP = { sample: null, downloads: null, mcp: null, iaOff: false };
+  async function cargarCapacidades() {
+    const use = async (n) => { try { return window.claude?.use ? await window.claude.use(n) : null } catch (e) { return null } };
+    const [sample, downloads, mcp] = await Promise.all([use("sample"), use("downloads"), use("mcp")]);
+    Object.assign(CAP, { sample, downloads, mcp });
+    scheduleRender();
+  }
+  const r0 = (v) => Math.round(Number(v) || 0);
+
+  function contextoIA() {
+    const tm = today().slice(0, 7);
+    const meses = [0, 1, 2, 3].map(i => shiftMonth(tm, -i)).map(m => {
+      const r = resumenMes(m);
+      return { mes: m, ingresos: r0(r.ing), gastos: r0(r.gas), ahorro: r0(r.neto), tasaAhorro: r.tasa == null ? null : Math.round(r.tasa * 100), prescindibles: r0(r.presc),
+        porCategoria: Object.fromEntries(Object.entries(r.porCat).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([c, v]) => [c + (ESENCIAL[c] === false ? " (no esencial)" : ""), r0(v)])) };
+    });
+    const r = resumenMes(tm);
+    return {
+      hoy: today(), moneda: "COP",
+      meses,
+      presupuestosMesActual: S.pres.map(p => ({ categoria: p.categoria, tope: r0(p.tope), gastado: r0(r.porCat[p.categoria]) })),
+      cuentas: S.cuentas.filter(c => !isCard(c)).map(c => ({ nombre: c.nombre, tipo: c.tipo, moneda: c.moneda, saldo: r0(saldoCuenta(c)) })),
+      tarjetas: S.cuentas.filter(isCard).map(c => { const e = estadoTarjeta(c); return { nombre: c.nombre, deuda: r0(e.deuda), cupo: r0(e.cupo), usoCupoPct: e.uso == null ? null : Math.round(e.uso * 100), tasaEA: c.tasaEA || null, valorAPagar: e.configurada ? r0(e.pendiente) : null, fechaLimitePago: e.fechaPago || null, comprasACuotasActivas: e.configurada ? cuotasActivas(c).length : 0 } }),
+      deudas: S.deudas.filter(d => saldoDeuda(d) > 0).map(d => ({ tipo: d.tipo === "debo" ? "debo" : "me deben", contraparte: d.contraparte, concepto: d.concepto || "", saldo: r0(saldoDeuda(d)), cuota: r0(d.cuota), tasaEA: d.tasaEA || null, proximaFecha: proxFechaDeuda(d) })),
+      metas: S.metas.map(m => { const e = estadoMeta(m); return { nombre: m.nombre, objetivo: r0(e.obj), ahorrado: r0(e.ap), fechaLimite: m.fechaLimite || null, aporteMensualNecesario: e.porMes ? r0(e.porMes) : null, estado: e.lograda ? "lograda" : e.vencida ? "vencida" : e.atrasada ? "atrasada" : "a tiempo" } }),
+      ahorroPromedio3Meses: ahorroPromedio() == null ? null : r0(ahorroPromedio()),
+      patrimonioNeto: r0(patrimonio().neto),
+      alertasActuales: alertas(r, resumenMes(shiftMonth(tm, -1))).map(a => a.t),
+    };
+  }
+  const PROMPT_BASE = "Eres un asesor financiero personal para una persona en Colombia. Hablas en español claro, cercano y directo, sin tecnicismos innecesarios. Usas solo los datos que te doy (montos en pesos colombianos, COP). No inventes cifras. No recomiendes productos financieros de marcas específicas. Si algo depende de su situación tributaria, sugiere confirmarlo con un contador.";
+  function errIA(e) {
+    const c = e?.code;
+    if (c === "not_granted" || c === "sampling_disabled" || c === "not_declared" || c === "capability_disabled" || c === "capability_removed") { CAP.iaOff = true; return "El asesor con Claude no está disponible en esta vista (permiso no concedido)." }
+    if (c === "rate_limited") return "Has hecho muchas consultas seguidas. Espera un momento e inténtalo de nuevo.";
+    if (c === "session_expired") return "Tu sesión expiró. Vuelve a iniciar sesión en claude.ai.";
+    if (c === "invalid_json") return "La respuesta llegó incompleta. Toca “Analizar” otra vez.";
+    if (c === "refused") return "Claude no pudo responder esa consulta. Reformúlala.";
+    return "No se pudo completar el análisis. Inténtalo de nuevo.";
+  }
+  async function analizar() {
+    if (!CAP.sample || S.iaBusy) return;
+    S.iaBusy = "analisis"; S.iaErr = ""; render();
+    const prompt = `${PROMPT_BASE}
+
+Analiza las finanzas de este mes y los anteriores. Busca gastos que sobran, riesgos (tarjetas, deudas, presupuestos excedidos) y qué debe hacer para cumplir sus metas.
+
+Responde SOLO con un objeto JSON con esta forma exacta:
+{"puntaje": número 0-100 (salud financiera), "diagnostico": "2-3 frases", "hallazgos": [{"titulo": "corto", "detalle": "1-2 frases con cifras", "ahorroMensual": número en COP o 0}], "plan": [{"paso": "acción concreta", "detalle": "cómo hacerlo"}], "accionSemana": "una sola acción para esta semana"}
+Entre 3 y 5 hallazgos y entre 3 y 4 pasos en el plan.
+
+DATOS:
+${JSON.stringify(contextoIA())}`;
+    try {
+      const res = await CAP.sample.json(prompt, { cache: false });
+      if (!res || typeof res !== "object" || !Array.isArray(res.hallazgos)) throw { code: "invalid_json" };
+      S.asesor = { fecha: Date.now(), mes: today().slice(0, 7), r: res };
+      if (S.mode === "db") db.doc("asesor/ultimo").set(S.asesor).catch(() => { });
+      else saveLocal();
+    } catch (e) { S.iaErr = errIA(e) }
+    finally { S.iaBusy = null; render() }
+  }
+  function fmtTexto(t) {
+    return esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").split(/\n{2,}/).map(p => /^\s*[-•]\s/m.test(p)
+      ? "<ul>" + p.split("\n").filter(l => l.trim()).map(l => "<li>" + l.replace(/^\s*[-•]\s*/, "") + "</li>").join("") + "</ul>"
+      : "<p>" + p.replace(/\n/g, "<br>") + "</p>").join("");
+  }
+  let chatCtl = null;
+  async function preguntar(q) {
+    q = q.trim(); if (!q || !CAP.sample || S.iaBusy) return;
+    S.chat = S.chat || [];
+    const first = !S.chat.length;
+    S.chat.push({ role: "user", content: q, show: q });
+    S.chat.push({ role: "assistant", content: "", show: "", pending: true });
+    S.iaBusy = "chat"; S.iaErr = ""; render();
+    const turns = S.chat.slice(0, -1).slice(-10).map((m, i, arr) => ({ role: m.role, content: m.role === "user" && (first ? i === arr.length - 1 : i === 0) ? `${PROMPT_BASE} Responde en máximo 180 palabras, con cifras concretas cuando ayuden.\n\nDATOS DE SUS FINANZAS:\n${JSON.stringify(contextoIA())}\n\nPREGUNTA: ${m.content}` : m.content }));
+    if (turns[0]?.role !== "user") turns.shift();
+    const msg = S.chat[S.chat.length - 1];
+    chatCtl = new AbortController();
+    try {
+      const res = await CAP.sample(turns, { cache: false, signal: chatCtl.signal, onText: ({ text }) => { msg.show = text; const el = document.getElementById("chatLast"); if (el) el.innerHTML = fmtTexto(text) } });
+      msg.content = msg.show = res.text;
+    } catch (e) {
+      if (e?.code === "cancelled") { msg.content = msg.show = e.text || "(detenido)" }
+      else { S.iaErr = errIA(e); S.chat.splice(-2, 2) }
+    } finally { msg.pending = false; S.iaBusy = null; chatCtl = null; render() }
+  }
+  function vAsesor() {
+    const r = resumenMes(S.month), prev = resumenMes(shiftMonth(S.month, -1));
+    const reglas = alertas(r, prev);
+    const a = S.asesor?.r, hasIA = !!CAP.sample && !CAP.iaOff;
+    const sugerencias = ["¿Cómo salgo más rápido de mis deudas?", "¿Cuánto debería tener en mi fondo de emergencia?", "¿Qué gasto debería recortar primero?"];
+    const iaPanel = !hasIA ? `<section class="panel"><div class="panel-head"><h2>Asesor con Claude</h2></div><p class="hint" style="margin:0">El análisis con Claude funciona al abrir esta página en claude.ai y aceptar el permiso. Mientras tanto, abajo tienes los consejos automáticos.</p></section>` : `
+      <section class="panel">
+        <div class="panel-head"><h2>Análisis de tu mes con Claude</h2><button class="btn small primary" data-act="analizar" ${S.iaBusy ? "disabled" : ""}>${S.iaBusy === "analisis" ? "Analizando…" : a ? "Analizar de nuevo" : "Analizar mi mes"}</button></div>
+        ${S.iaErr ? `<p class="err" style="margin:0 0 10px">${esc(S.iaErr)}</p>` : ""}
+        ${a ? `<div class="advice">
+          <div class="score"><span class="num">${r0(a.puntaje)}</span><span class="hint">de 100</span></div>
+          <div style="min-width:0"><p style="margin:0">${esc(a.diagnostico)}</p><p class="hint" style="margin:6px 0 0">Análisis del ${new Date(S.asesor.fecha).toLocaleDateString("es-CO", { day: "numeric", month: "long" })}</p></div>
+        </div>
+        <h3 class="sub-h">Lo que encontré</h3>
+        <div class="accounts">${(a.hallazgos || []).map(h => `<div class="acc"><span class="name">${esc(h.titulo)}</span><span class="hint" style="color:var(--ink)">${esc(h.detalle)}</span>${r0(h.ahorroMensual) > 0 ? `<span class="pill ok" style="justify-self:start">Ahorro posible: ${money(h.ahorroMensual)}/mes</span>` : ""}</div>`).join("")}</div>
+        <h3 class="sub-h">Plan</h3>
+        <ol class="plan">${(a.plan || []).map(p => `<li><b>${esc(p.paso)}</b><span class="hint" style="display:block">${esc(p.detalle)}</span></li>`).join("")}</ol>
+        ${a.accionSemana ? `<div class="week"><span class="lbl">Tu acción de esta semana</span><b>${esc(a.accionSemana)}</b></div>` : ""}`
+        : `<p class="hint" style="margin:0">Claude revisa tus últimos 4 meses, presupuestos, tarjetas, deudas y metas, y te dice qué gastos sobran y cómo cumplir tus objetivos. Solo se envían totales por categoría, no tus movimientos uno por uno.</p>`}
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Pregúntale a tu asesor</h2>${S.chat?.length ? `<button class="btn small" data-act="chat-clear">Nueva conversación</button>` : ""}</div>
+        <div class="chat">${(S.chat || []).map((m, i, arr) => `<div class="bubble ${m.role}" ${i === arr.length - 1 && m.role === "assistant" ? 'id="chatLast"' : ""}>${m.role === "user" ? esc(m.show) : m.show ? fmtTexto(m.show) : '<span class="hint">Pensando…</span>'}</div>`).join("")}</div>
+        ${!S.chat?.length ? `<div class="chips">${sugerencias.map(s => `<button class="btn small" data-ask="${esc(s)}">${esc(s)}</button>`).join("")}</div>` : ""}
+        <form id="askForm" class="ask"><input id="askQ" type="text" placeholder="Ej: ¿puedo pagar un viaje de 3 millones en diciembre?" autocomplete="off" ${S.iaBusy ? "disabled" : ""}><button class="btn primary" type="submit" ${S.iaBusy ? "disabled" : ""}>Preguntar</button>${S.iaBusy === "chat" ? `<button class="btn" type="button" data-act="chat-stop">Detener</button>` : ""}</form>
+      </section>`;
+    return iaPanel + `<section class="panel"><div class="panel-head"><h2>Consejos automáticos</h2><span class="hint">${esc(monthName(S.month))} · sin IA</span></div>
+      <ul class="alerts">${reglas.map(x => `<li class="${x.lvl}"><div><strong>${esc(x.t)}</strong>${esc(x.d)}</div></li>`).join("")}</ul>
+      <p class="hint" style="margin:14px 0 0">También puedes pedirle a Claude en el chat que registre gastos por ti, por ejemplo: “registra 45.000 de mercado hoy en Nequi”.</p></section>`;
+  }
+
+  // Impuestos y donaciones
+  const UVT_DEF = { 2024: 47065, 2025: 49799, 2026: 52374 };
+  const uvtDe = (y) => Number(S.config.uvt?.[y]) || UVT_DEF[y] || UVT_DEF[2026];
+  const GMF_RE = /gmf|4 ?x ?1000|gravamen/;
+  function datosFiscales(y) {
+    const ms = S.movs.filter(m => m.fecha?.startsWith(y + "-"));
+    let ing = 0, gas = 0, tarj = 0, consig = 0, gmf = 0, imp = 0;
+    const ingCat = {}, ded = {}, don = {};
+    for (const m of ms) {
+      const v = movBase(m), c = cuentaById(m.cuentaId);
+      if (m.tipo === "ingreso" && !NEUTRAL.has(m.categoria)) { ing += v; ingCat[m.categoria] = (ingCat[m.categoria] || 0) + v }
+      if (m.tipo === "ingreso" && !isCard(c)) consig += v;
+      if (m.tipo === "transferencia") { const d = cuentaById(m.cuentaDestinoId); if (d && !isCard(d)) consig += toBase(Number(m.montoDestino ?? m.monto) || 0, d.moneda, m.tasa) }
+      if (m.tipo === "gasto" && !NEUTRAL.has(m.categoria)) {
+        gas += v; if (isCard(c)) tarj += v;
+        if (m.categoria === "Impuestos") imp += v;
+        if (m.categoria === "Intereses y comisiones" && GMF_RE.test(norm(m.nota))) gmf += v;
+        if (m.deducible) ded[m.categoria] = (ded[m.categoria] || 0) + v;
+        if (m.categoria === "Donaciones") { const k = (m.nota || "Sin especificar").trim(); don[k] = (don[k] || 0) + v }
+      }
+    }
+    return { ms, ing, gas, tarj, consig, gmf, imp, ingCat, ded, don, pat: patrimonio().act };
+  }
+  function vImpuestos() {
+    const y = S.anioFiscal || today().slice(0, 4), uvt = uvtDe(y), f = datosFiscales(y);
+    const anios = [...new Set([today().slice(0, 4), ...S.movs.map(m => m.fecha?.slice(0, 4)).filter(Boolean)])].sort().reverse();
+    const topes = [
+      ["Ingresos brutos del año", f.ing, 1400],
+      ["Patrimonio bruto (hoy)", f.pat, 4500],
+      ["Consumos con tarjeta de crédito", f.tarj, 1400],
+      ["Compras y consumos totales", f.gas, 1400],
+      ["Consignaciones y depósitos", f.consig, 1400],
+    ];
+    const supera = topes.filter(([, v, u]) => v >= u * uvt);
+    const dedTot = Object.values(f.ded).reduce((a, b) => a + b, 0), donTot = Object.values(f.don).reduce((a, b) => a + b, 0);
+    return `<section class="panel">
+        <div class="panel-head"><h2>¿Debes declarar renta?</h2>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><select id="anioF" aria-label="Año">${anios.map(a => `<option ${a === y ? "selected" : ""}>${a}</option>`).join("")}</select>${CAP.downloads ? `<button class="btn small" data-act="export-anio">Exportar año a Excel</button>` : ""}</div></div>
+        <p class="hint" style="margin:0 0 14px">Año gravable ${y} · UVT ${money(uvt)} (cámbiala en Cuentas → Configuración). Si superas <b>cualquiera</b> de estos topes, debes declarar en ${Number(y) + 1}.</p>
+        <div class="pill ${supera.length ? "bad" : "ok"}" style="margin-bottom:14px">${supera.length ? `Superas ${supera.length} ${supera.length === 1 ? "tope" : "topes"}: probablemente debes declarar` : "Por ahora no superas ningún tope"}</div>
+        <div class="cats">${topes.map(([n, v, u]) => { const t = u * uvt, p = v / t; return `<div class="cat-row"><span>${n} <span class="hint">tope ${u.toLocaleString("es-CO")} UVT</span></span><span class="num">${money(v)} <span class="hint">de ${compact(t)}</span></span><div class="bar budget"><b class="${p >= 1 ? "bad" : p >= .8 ? "warn" : "ok"}" style="width:${Math.min(100, Math.max(1, p * 100))}%"></b></div></div>` }).join("")}</div>
+        <p class="hint" style="margin:14px 0 0">Cálculo orientativo con lo que registras aquí. Faltan ingresos o cuentas que no hayas registrado. Confirma con un contador o con la DIAN.</p>
+      </section>
+      <div class="grid2">
+        <section class="panel"><div class="panel-head"><h2>Ingresos del año</h2><span class="num">${money(f.ing)}</span></div>
+          ${Object.keys(f.ingCat).length ? `<div class="cats">${Object.entries(f.ingCat).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div class="cat-row"><span>${esc(c)}</span><span class="num">${money(v)}</span></div>`).join("")}</div>` : `<p class="hint" style="margin:0">Sin ingresos registrados en ${y}.</p>`}
+          <h3 class="sub-h">Impuestos pagados</h3>
+          <div class="cats"><div class="cat-row"><span>Categoría Impuestos</span><span class="num">${money(f.imp)}</span></div><div class="cat-row"><span>GMF (4x1000) <span class="hint">50% deducible</span></span><span class="num">${money(f.gmf)}</span></div></div>
+        </section>
+        <section class="panel"><div class="panel-head"><h2>Donaciones y deducibles</h2><span class="num">${money(dedTot)}</span></div>
+          ${donTot ? `<div class="cats">${Object.entries(f.don).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div class="cat-row"><span>${esc(k)}</span><span class="num">${money(v)}</span></div>`).join("")}</div>
+            <p class="hint" style="margin:10px 0 0">Donaciones del año: <b class="num">${money(donTot)}</b>. Si la entidad es del régimen tributario especial y tienes certificado, podrías descontar hasta el 25% del impuesto: <b class="num">${money(donTot * .25)}</b> aprox.</p>` : `<p class="hint" style="margin:0">No hay donaciones en ${y}. Al registrar un gasto en la categoría Donaciones, escribe la entidad en la nota.</p>`}
+          ${Object.keys(f.ded).length ? `<h3 class="sub-h">Gastos marcados como deducibles</h3><div class="cats">${Object.entries(f.ded).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<div class="cat-row"><span>${esc(c)}</span><span class="num">${money(v)}</span></div>`).join("")}</div>` : ""}
+          <p class="hint" style="margin:12px 0 0">Guarda los certificados: medicina prepagada, intereses de vivienda, aportes voluntarios a pensión o AFC y dependientes también pueden reducir tu impuesto.</p>
+        </section>
+      </div>`;
+  }
+
+  // Exportación a Excel
+  async function exportar(alcance) {
+    if (!CAP.downloads) return;
+    const y = alcance === "anio" ? (S.anioFiscal || today().slice(0, 4)) : null;
+    const ms = S.movs.filter(m => y ? m.fecha?.startsWith(y + "-") : m.fecha?.slice(0, 7) === S.month).sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const filas = ms.map(m => ({ Fecha: m.fecha, Tipo: m.tipo, Categoría: m.categoria || "", Cuenta: cuentaById(m.cuentaId)?.nombre || "", "Cuenta destino": cuentaById(m.cuentaDestinoId)?.nombre || "", Nota: m.nota || "", Monto: Number(m.monto) || 0, Moneda: m.moneda || "COP", Tasa: m.tasa || "", "Monto COP": r0(movBase(m)), Prescindible: m.prescindible ? "Sí" : "", Deducible: m.deducible ? "Sí" : "", Cuotas: m.cuotas || "" }));
+    const nombre = y ? `mis-finanzas-${y}` : `mis-finanzas-${S.month}`;
+    try {
+      let data, filename;
+      try {
+        const XLSX = await loadXLSX(), wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas.length ? filas : [{ Fecha: "Sin movimientos" }]), "Movimientos");
+        const meses = y ? Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, "0")}`) : [S.month];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(meses.map(mm => { const r = resumenMes(mm); return { Mes: mm, Ingresos: r0(r.ing), Gastos: r0(r.gas), Ahorro: r0(r.neto), "Tasa de ahorro %": r.tasa == null ? "" : Math.round(r.tasa * 100), Prescindibles: r0(r.presc) } })), "Resumen mensual");
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(S.deudas.length ? S.deudas.map(d => ({ Tipo: d.tipo === "debo" ? "Debo" : "Me deben", Contraparte: d.contraparte, Concepto: d.concepto || "", Monto: d.monto, Saldo: r0(saldoDeuda(d)), Cuota: d.cuota || "", "Tasa E.A. %": d.tasaEA || "", "Próxima fecha": proxFechaDeuda(d) || "" })) : [{ Tipo: "Sin deudas" }]), "Deudas");
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(S.metas.length ? S.metas.map(m => { const e = estadoMeta(m); return { Meta: m.nombre, Objetivo: e.obj, Ahorrado: r0(e.ap), "Fecha límite": m.fechaLimite || "", "Aporte mensual necesario": e.porMes ? r0(e.porMes) : "" } }) : [{ Meta: "Sin metas" }]), "Metas");
+        data = XLSX.write(wb, { type: "array", bookType: "xlsx" }); filename = nombre + ".xlsx";
+      } catch (e) {
+        const cols = Object.keys(filas[0] || { Fecha: "" });
+        const q = (v) => /[";\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+        data = "\uFEFF" + [cols.join(";"), ...filas.map(f => cols.map(c => q(f[c])).join(";"))].join("\r\n"); filename = nombre + ".csv";
+      }
+      await CAP.downloads.save({ filename, data });
+      toast("Archivo listo");
+    } catch (e) {
+      if (e?.code === "declined") return;
+      toast(e?.code === "rate_limited" ? "Ya hay una descarga pendiente de confirmar" : "No se pudo generar el archivo");
+    }
+  }
+
+  // Google Calendar
+  // Regla mensual que respeta días 29–31 (en meses cortos cae el último día)
+  function rruleMensual(dia, extra) {
+    dia = Number(dia);
+    const base = dia <= 28 ? `BYMONTHDAY=${dia}` : `BYMONTHDAY=${Array.from({ length: dia - 27 }, (_, i) => 28 + i).join(",")};BYSETPOS=-1`;
+    return `RRULE:FREQ=MONTHLY;${base}${extra || ""}`;
+  }
+  async function agendar(kind, id) {
+    if (!CAP.mcp) return;
+    let summary, fecha, rrule = null, desc;
+    if (kind === "card") {
+      const c = cuentaById(id), e = estadoTarjeta(c);
+      if (!e.configurada) return toast("Configura el día de pago de la tarjeta primero");
+      fecha = e.fechaPago; summary = `Pagar tarjeta ${c.nombre}`;
+      desc = `Fecha límite de pago de ${c.nombre}. Valor estimado del próximo pago: ${money(e.pendiente)}. Revisa el valor exacto en tu extracto. Creado desde Mis Finanzas.`;
+      rrule = rruleMensual(Number(c.diaPago) || Number(fecha.slice(8, 10)));
+    } else {
+      const d = S.deudas.find(x => x.id === id), f = proxFechaDeuda(d), debo = d.tipo === "debo";
+      if (!f) return toast("Esta deuda no tiene una fecha de pago");
+      fecha = f;
+      if (fecha < today()) fecha = Number(d.diaPago) > 0 ? dayOf(shiftMonth(today().slice(0, 7), Number(today().slice(8, 10)) > Number(d.diaPago) ? 1 : 0), d.diaPago) : today();
+      summary = `${debo ? "Pagar a" : "Cobrar a"} ${d.contraparte}${d.concepto ? " · " + d.concepto : ""}`;
+      desc = `${debo ? "Cuota" : "Cobro"}: ${money(d.cuota ? Math.min(d.cuota, saldoDeuda(d)) : saldoDeuda(d))}. Saldo pendiente: ${money(saldoDeuda(d))}. Creado desde Mis Finanzas.`;
+      if (Number(d.diaPago) > 0) {
+        const pl = debo ? plazoDeuda(d) : null;
+        rrule = rruleMensual(d.diaPago, pl?.meses ? `;COUNT=${pl.meses}` : "");
+      }
+    }
+    const input = { summary, description: desc, startTime: `${fecha}T09:00:00`, endTime: `${fecha}T09:30:00`, overrideReminders: [{ method: "popup", minutes: 1440 }, { method: "email", minutes: 1440 }, { method: "popup", minutes: 60 }] };
+    if (rrule) input.recurrenceData = [rrule];
+    S.agendando = id; render();
+    try {
+      await CAP.mcp.callTool("Google Calendar", "create_event", input);
+      const cal = { fecha, recurrente: !!rrule, creado: Date.now() };
+      if (kind === "card") { const { id: _, ...rest } = cuentaById(id); await put("cuentas", id, { ...rest, calendario: cal }) }
+      else { const { id: _, ...rest } = S.deudas.find(x => x.id === id); await put("deudas", id, { ...rest, calendario: cal }) }
+      toast(rrule ? "Recordatorio mensual creado en Google Calendar" : "Recordatorio creado en Google Calendar");
+    } catch (e) {
+      const c = e?.code;
+      toast(c === "server_not_connected" || c === "server_not_found" || c === "needs_reauth" ? "Conecta Google Calendar en los conectores de claude.ai y vuelve a intentarlo"
+        : c === "not_granted" || c === "consent_required" || c === "blocked_by_policy" ? "No se concedió permiso para usar Google Calendar"
+        : c === "rate_limited" ? "Demasiadas solicitudes. Inténtalo en un momento" : "No se pudo crear el evento en Google Calendar");
+    } finally { S.agendando = null; render() }
+  }
+  function btnAgendar(kind, doc) {
+    if (!CAP.mcp) return "";
+    if (doc.calendario) return `<button class="btn small" data-agendar="${kind}|${doc.id}" title="Crear otro recordatorio">Agendado ✓</button>`;
+    return `<button class="btn small" data-agendar="${kind}|${doc.id}" ${S.agendando === doc.id ? "disabled" : ""}>${S.agendando === doc.id ? "Agendando…" : "Agendar en Calendar"}</button>`;
+  }
+
   // ---------- Diálogo de movimientos ----------
   let editMov = null, tipoSel = "gasto";
   function fillSelect(sel, items, val) { sel.innerHTML = items.map(([v, t]) => `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("") }
@@ -1623,6 +1903,8 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     const t = e.target.closest("button"); if (!t) return;
     const ds = t.dataset;
     if (ds.importAcc) return openImport(ds.importAcc);
+    if (ds.ask) return preguntar(ds.ask);
+    if (ds.agendar) { const [k, i] = ds.agendar.split("|"); return agendar(k, i) }
     if (ds.undoLote) { if (!ds.confirm) { ds.confirm = "1"; t.textContent = "¿Seguro? Toca otra vez"; return } return deshacerLote(ds.undoLote) }
     if (ds.delRegla) { return del("reglas", ds.delRegla).then(() => toast("Regla eliminada"), e => toast(writeErr(e))) }
     if (ds.abono) return openAbono(S.deudas.find(d => d.id === ds.abono));
@@ -1648,7 +1930,12 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     else if (a === "new-mov") openMov();
     else if (a === "seed") seed();
     else if (a === "unseed") unseed();
-    else if (a === "save-cfg") { const u = parseAmount($("cfgUSD").value), e2 = parseAmount($("cfgEUR").value); if (u > 0 && e2 > 0) putConfig({ tasaUSD: u, tasas: { USD: u, EUR: e2 } }).then(() => toast("Tasas guardadas"), e => toast(writeErr(e))); else toast("Escribe tasas válidas, por ejemplo 4100 y 4450") }
+    else if (a === "save-cfg") { const u = parseAmount($("cfgUSD").value), e2 = parseAmount($("cfgEUR").value); const uv = parseAmount($("cfgUVT").value), yy = today().slice(0, 4); if (u > 0 && e2 > 0 && uv > 0) putConfig({ tasaUSD: u, tasas: { USD: u, EUR: e2 }, uvt: { ...(S.config.uvt || {}), [yy]: uv } }).then(() => toast("Configuración guardada"), e => toast(writeErr(e))); else toast("Escribe valores válidos, por ejemplo 4100, 4450 y 52374") }
+    else if (a === "analizar") analizar();
+    else if (a === "chat-clear") { S.chat = []; render() }
+    else if (a === "chat-stop") chatCtl?.abort();
+    else if (a === "export-mes") exportar("mes");
+    else if (a === "export-anio") exportar("anio");
     else if (a === "import") openImport();
   });
   let qT;
@@ -1658,7 +1945,9 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
   $("view").addEventListener("change", e => {
     if (e.target.id === "ft") { S.filt.tipo = e.target.value; render() }
     if (e.target.id === "fc") { S.filt.cuenta = e.target.value; render() }
+    if (e.target.id === "anioF") { S.anioFiscal = e.target.value; render() }
   });
+  $("view").addEventListener("submit", e => { if (e.target.id === "askForm") { e.preventDefault(); const q = $("askQ").value; $("askQ").value = ""; preguntar(q) } });
   $("tipoSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTipo(b.dataset.v) });
   $("fCat").addEventListener("change", () => { catTocada = true; autoPresc() });
   $("fNota").addEventListener("input", () => { clearTimeout(notaT); notaT = setTimeout(sugerirCat, 250) });
