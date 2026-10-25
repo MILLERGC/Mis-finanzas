@@ -172,6 +172,32 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
 .cat-row .bar.budget { position: relative; height: 8px; overflow: visible }
 .cat-row .bar.budget b { background: var(--accent) } .cat-row .bar.budget b.warn { background: var(--warn) } .cat-row .bar.budget b.bad { background: var(--neg) }
 .cat-row .bar.budget i { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--ink); opacity: .55; border-radius: 1px }
+dialog.wide { width: min(980px, calc(100vw - 24px)) }
+.imp-wrap { padding: 20px; display: grid; gap: 14px }
+.imp-body { display: grid; gap: 14px; min-width: 0 }
+.steps { display: flex; gap: 6px; flex-wrap: wrap; font-size: .8rem }
+.steps span { padding: 4px 10px; border-radius: 99px; background: var(--sunken); color: var(--muted) }
+.steps span.on { background: var(--accent); color: var(--accent-ink); font-weight: 600 }
+.steps span.done { background: var(--accent-soft); color: var(--accent) }
+.drop { display: grid; gap: 6px; justify-items: center; text-align: center; padding: 28px 16px; border: 2px dashed var(--line); border-radius: var(--r); cursor: pointer; background: var(--sunken) }
+.drop.over { border-color: var(--accent); background: var(--accent-soft) }
+.drop input { max-width: 100%; font-size: .85rem }
+.imp-tbl { max-height: 52vh; overflow: auto; margin-top: 0 }
+.imp-tbl table { min-width: 680px }
+.imp-tbl thead th { position: sticky; top: 0; background: var(--surface); z-index: 1 }
+.imp-tbl select { padding: 5px 6px; font-size: .82rem; min-width: 170px }
+.imp-tbl tr.off td { opacity: .5 }
+@media (max-width: 640px) {
+  .imp-tbl table { min-width: 0 } .imp-tbl thead { display: none }
+  .imp-tbl tr { display: grid; grid-template-columns: 26px 1fr auto; grid-template-areas: "c f v" ". d d" ". s s"; gap: 4px 8px; padding: 10px 0; border-bottom: 1px solid var(--line) }
+  .imp-tbl td { border: 0; padding: 0 }
+  .imp-tbl td:nth-child(1) { grid-area: c } .imp-tbl td:nth-child(2) { grid-area: f } .imp-tbl td:nth-child(3) { grid-area: d } .imp-tbl td:nth-child(4) { grid-area: s } .imp-tbl td:nth-child(5) { grid-area: v }
+  .imp-tbl select { width: 100%; min-width: 0 }
+}
+.prog { height: 8px; background: var(--sunken); border-radius: 99px; overflow: hidden }
+.prog b { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s }
+.rules { display: grid; gap: 6px; margin-top: 12px }
+.rules div { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--sunken); border-radius: 8px; font-size: .86rem; flex-wrap: wrap }
 .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end }
 @media (prefers-reduced-motion: no-preference) { .kpi, .panel { transition: border-color .2s } }
 </style>
@@ -218,6 +244,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
       <label class="f"><span id="lblCuenta">Cuenta</span> <select id="fCuenta"></select></label>
       <label class="f" id="wrapCat">Categoría <select id="fCat"></select></label>
       <label class="f" id="wrapDest" hidden>Cuenta destino <select id="fDest"></select></label>
+      <label class="f" id="wrapTasa" hidden><span id="lblTasa">Tasa de cambio</span> <input id="fTasa" type="text" inputmode="decimal"></label>
       <label class="f" id="wrapCuotas" hidden>Número de cuotas <input id="fCuotas" type="number" min="1" max="72" step="1" value="1"></label>
       <label class="f" id="wrapMontoDest" hidden>Monto recibido <input id="fMontoDest" type="text" inputmode="decimal" placeholder="En la moneda de destino"></label>
       <label class="f full">Nota <input id="fNota" type="text" placeholder="Ej: mercado de la semana, Netflix, pago de Juan"></label>
@@ -243,7 +270,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
       <label class="f">Tipo
         <select id="aTipo"><option value="banco">Banco</option><option value="billetera">Billetera digital</option><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta de crédito</option><option value="inversion">Inversión</option></select>
       </label>
-      <label class="f">Moneda <select id="aMoneda"><option>COP</option><option>USD</option></select></label>
+      <label class="f">Moneda <select id="aMoneda"><option>COP</option><option>USD</option><option>EUR</option></select></label>
       <label class="f full"><span id="lblSaldo">Saldo inicial</span> <input id="aSaldo" type="text" inputmode="decimal" placeholder="0"></label>
     </div>
     <div class="form-grid" id="cardFields" hidden>
@@ -276,6 +303,14 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   </form>
 </dialog>
 
+<dialog id="impDlg" class="wide">
+  <div class="imp-wrap">
+    <div class="panel-head" style="margin:0"><h2>Importar extracto</h2><button type="button" class="btn small" data-imp="close">Cerrar</button></div>
+    <div class="steps" id="impSteps"></div>
+    <div id="impBody" class="imp-body"></div>
+  </div>
+</dialog>
+
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -298,7 +333,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   // ---------- Estado ----------
   const S = {
     mode: "loading", // db | local | loading
-    cuentas: [], movs: [], pres: [], deudas: [], metas: [], config: { tasaUSD: 4000, monedaBase: "COP" },
+    cuentas: [], movs: [], pres: [], deudas: [], metas: [], reglas: [], config: { tasaUSD: 4000, monedaBase: "COP", anios: [] },
     estrategia: "avalancha", histOpen: null,
     tab: "resumen", month: ym(new Date()),
     filt: { tipo: "", cuenta: "", q: "" },
@@ -346,8 +381,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
 
   // ---------- Cálculos ----------
   const cuentaById = (id) => S.cuentas.find(c => c.id === id);
-  function toBase(amount, moneda) { return moneda === "USD" ? amount * (Number(S.config.tasaUSD) || 0) : amount }
-  function movBase(m) { return toBase(Number(m.monto) || 0, m.moneda || cuentaById(m.cuentaId)?.moneda || "COP") }
+  function toBase(amount, moneda, tasa) { return !moneda || moneda === "COP" ? amount : amount * (Number(tasa) || tasaDe(moneda)) }
+  function movBase(m) { return toBase(Number(m.monto) || 0, m.moneda || cuentaById(m.cuentaId)?.moneda || "COP", m.tasa) }
   function saldoCuenta(c) {
     let s = Number(c.saldoInicial) || 0;
     for (const m of S.movs) {
@@ -445,10 +480,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   // ---------- Almacenamiento ----------
   const LS_KEY = "mis-finanzas-local-v1";
   function loadLocal() {
-    try { const d = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (d) { S.cuentas = d.cuentas || []; S.movs = d.movs || []; S.pres = d.pres || []; S.deudas = d.deudas || []; S.metas = d.metas || []; S.config = { ...S.config, ...(d.config || {}) } } } catch (e) { }
+    try { const d = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (d) { S.cuentas = d.cuentas || []; S.movs = d.movs || []; S.pres = d.pres || []; S.deudas = d.deudas || []; S.metas = d.metas || []; S.reglas = d.reglas || []; S.config = { ...S.config, ...(d.config || {}) } } } catch (e) { }
   }
-  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ cuentas: S.cuentas, movs: S.movs, pres: S.pres, deudas: S.deudas, metas: S.metas, config: S.config })) } catch (e) { } }
-  const COL = { cuentas: "cuentas", movs: "movimientos", pres: "presupuestos", deudas: "deudas", metas: "metas" };
+  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ cuentas: S.cuentas, movs: S.movs, pres: S.pres, deudas: S.deudas, metas: S.metas, reglas: S.reglas, config: S.config })) } catch (e) { } }
+  const COL = { cuentas: "cuentas", movs: "movimientos", pres: "presupuestos", deudas: "deudas", metas: "metas", reglas: "reglas" };
 
   async function put(kind, id, data) {
     if (S.mode === "db") { await db.collection(COL[kind]).doc(id).set(data); return }
@@ -477,13 +512,21 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     db = cap; S.mode = "db"; setStatus("Sincronizado", "ok");
     const onErr = (e) => { setStatus(e?.code === "revoked" ? "Sin acceso a los datos" : "Error de sincronización", "warn") };
     db.collection("cuentas").onSnapshot(s => { S.cuentas = withId(s).sort((a, b) => (a.creado || 0) - (b.creado || 0)); render() }, onErr);
-    db.collection("movimientos").orderBy("fecha", "desc").limit(1000).onSnapshot(s => { S.movs = withId(s); render() }, onErr);
+    // Una suscripción por año (máximo 1000 movimientos por consulta)
+    const porAnio = {}, subs = {};
+    const unir = () => { S.movs = Object.values(porAnio).flat(); S.lleno = Object.entries(porAnio).filter(([, v]) => v.length >= 1000).map(([y]) => y); scheduleRender() };
+    S.suscribirAnios = (ys) => { for (const y of ys) { if (subs[y]) continue; subs[y] = db.collection("movimientos").where("fecha", ">=", `${y}-01-01`).where("fecha", "<=", `${y}-12-31`).limit(1000).onSnapshot(s => { porAnio[y] = withId(s); unir() }, onErr) } };
+    const yNow = new Date().getFullYear();
+    S.suscribirAnios([String(yNow), String(yNow - 1)]);
+    db.collection("reglas").onSnapshot(s => { S.reglas = withId(s); scheduleRender() }, onErr);
     const byCreado = (a, b) => (a.creado || 0) - (b.creado || 0);
     db.collection("presupuestos").onSnapshot(s => { S.pres = withId(s); render() }, onErr);
     db.collection("deudas").onSnapshot(s => { S.deudas = withId(s).sort(byCreado); render() }, onErr);
     db.collection("metas").onSnapshot(s => { S.metas = withId(s).sort(byCreado); render() }, onErr);
-    db.doc("config/general").onSnapshot(s => { if (s.exists) { S.config = { ...S.config, ...s.data() }; render() } }, onErr);
+    db.doc("config/general").onSnapshot(s => { if (s.exists) { S.config = { ...S.config, ...s.data() }; S.suscribirAnios((S.config.anios || []).map(String)); scheduleRender() } }, onErr);
   }
+  let rq = false;
+  function scheduleRender() { if (rq) return; rq = true; requestAnimationFrame(() => { rq = false; render() }) }
   function setStatus(t, cls) { const el = $("status"); el.textContent = t; el.className = "status " + (cls || "") }
 
   // ---------- Render ----------
@@ -660,7 +703,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
       return `<div class="day"><h3><span>${dd}</span><span class="num">${tot >= 0 ? "+" : ""}${money(tot)}</span></h3>${ms.map(movRow).join("")}</div>`;
     }).join("") : `<div class="empty"><p>No hay movimientos con estos filtros en ${monthName(S.month)}.</p><button class="btn primary" data-act="new-mov">Registrar movimiento</button></div>`;
     return `<section class="panel">
-      <div class="panel-head"><h2>Movimientos</h2><span class="hint num">+${compact(r.ing)} · −${compact(r.gas)} · ${list.length} registros</span></div>
+      <div class="panel-head"><h2>Movimientos</h2><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="hint num">+${compact(r.ing)} · −${compact(r.gas)} · ${list.length} registros</span><button class="btn small" data-act="import">Importar extracto</button></div></div>
+      ${(S.lleno || []).length ? `<p class="err" style="margin:0 0 12px">El año ${S.lleno.join(", ")} llegó a 1000 movimientos y no se muestran todos. Los saldos pueden no cuadrar.</p>` : ""}
+      ${lotes().length ? `<div class="rules" style="margin:0 0 14px">${lotes().map(l => `<div><span>Importación: <b>${l.n}</b> movimientos del ${fechaCorta(l.desde)} al ${fechaCorta(l.hasta)}</span><button class="btn small danger" data-undo-lote="${l.id}">Deshacer</button></div>`).join("")}</div>` : ""}
       <div class="filters">
         <input type="text" id="fq" placeholder="Buscar nota o categoría" value="${esc(f.q)}">
         <select id="ft"><option value="">Todos los tipos</option><option value="gasto" ${f.tipo === "gasto" ? "selected" : ""}>Gastos</option><option value="ingreso" ${f.tipo === "ingreso" ? "selected" : ""}>Ingresos</option><option value="transferencia" ${f.tipo === "transferencia" ? "selected" : ""}>Transferencias</option></select>
@@ -691,16 +736,20 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
         return `<div class="acc"><div class="top2"><span class="name">${esc(c.nombre)}${c.ejemplo ? '<span class="tag ex">ejemplo</span>' : ""}</span><span class="type">${TIPO_CUENTA[c.tipo] || c.tipo} · ${c.moneda}</span></div>
           <span class="bal num ${s < 0 ? "neg" : ""}">${money(s, c.moneda)}</span>
           ${c.moneda !== "COP" ? `<span class="hint num">≈ ${money(toBase(s, c.moneda))}</span>` : ""}
-          <div class="row"><button class="btn small" data-edit-acc="${c.id}">Editar</button><button class="btn small" data-filter-acc="${c.id}">Ver movimientos</button></div></div>`;
+          <div class="row"><button class="btn small" data-edit-acc="${c.id}">Editar</button><button class="btn small" data-filter-acc="${c.id}">Ver movimientos</button><button class="btn small" data-import-acc="${c.id}">Importar</button></div></div>`;
       }).join("")}</div>
       <p class="hint" style="margin:14px 0 0">Total: tienes <b class="num">${money(p.act)}</b> y debes <b class="num">${money(p.pas)}</b> en tarjetas o saldos negativos.</p>
     </section>
     <section class="panel">
       <div class="panel-head"><h2>Configuración</h2><span class="hint">${S.mode === "db" ? "Se guarda en tu base de datos" : "Se guarda en este navegador"}</span></div>
       <div class="settings">
-        <label class="f">Tasa de cambio (1 USD en COP) <input id="cfgTasa" type="text" inputmode="decimal" value="${esc(S.config.tasaUSD)}"></label>
-        <button class="btn" data-act="save-cfg">Guardar tasa</button>
+        <label class="f">1 USD en pesos <input id="cfgUSD" type="text" inputmode="decimal" value="${esc(tasaDe("USD"))}"></label>
+        <label class="f">1 EUR en pesos <input id="cfgEUR" type="text" inputmode="decimal" value="${esc(tasaDe("EUR"))}"></label>
+        <button class="btn" data-act="save-cfg">Guardar tasas</button>
       </div>
+      <p class="hint" style="margin:10px 0 0">Cada movimiento en dólares o euros guarda la tasa del día en que lo registras, así tus meses pasados no cambian. Los saldos se convierten con la tasa de aquí.</p>
+      <h3 style="font-size:.9rem;margin-top:20px">Reglas de categorización</h3>
+      ${S.reglas.length ? `<div class="rules">${[...S.reglas].sort((a, b) => a.patron.localeCompare(b.patron)).map(r => `<div><span>Si la descripción dice <b>“${esc(r.patron)}”</b> → ${esc(r.categoria)} <span class="hint">(${r.tipo})</span></span><button class="btn small danger" data-del-regla="${r.id}">Quitar</button></div>`).join("")}</div>` : `<p class="hint" style="margin:6px 0 0">Aún no hay reglas. Se crean solas cuando corriges una categoría al importar un extracto.</p>`}
     </section>`;
   }
 
@@ -1026,6 +1075,341 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
       }).join("")}</div></section>`;
   }
 
+  // ---------- Fase 3: monedas, categorización e importación ----------
+  const MONEDAS = ["COP", "USD", "EUR"];
+  function tasaDe(moneda) {
+    if (!moneda || moneda === "COP") return 1;
+    const t = S.config.tasas?.[moneda] ?? (moneda === "USD" ? S.config.tasaUSD : moneda === "EUR" ? 4400 : 0);
+    return Number(t) || 0;
+  }
+  function norm(s) { return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase() }
+
+  // Diccionario de comercios frecuentes en Colombia (texto sin tildes, en minúscula)
+  const DICC_GASTO = [
+    [/rappi|ifood|didi ?food|domicilio|merqueo|\bjusto\b/, "Domicilios"],
+    [/\bexito\b|carulla|\bd1\b|tiendas ara|\bara\b|jumbo|olimpica|makro|pricesmart|alkosto|surtimax|euro supermercado|supermercado|fruver|isimo|colsubsidio merc/, "Mercado"],
+    [/\buber\b|\bdidi\b|cabify|indriver|terpel|primax|texaco|biomax|peaje|parqueadero|parking|transmilenio|tullave|metro de medellin|\bsitp\b|gasolin|combustible|eds /, "Transporte"],
+    [/netflix|spotify|disney|hbo|youtube|apple\.com|itunes|prime video|amazon prime|paramount|crunchyroll|deezer|google one|google storage|icloud|openai|chatgpt|anthropic|claude\.ai/, "Suscripciones"],
+    [/\bepm\b|\benel\b|codensa|vanti|gas natural|acueducto|aguas de|emcali|air-e|afinia|\bclaro\b|movistar|\btigo\b|\betb\b|\bwom\b|\bune\b|celsia|energia/, "Servicios"],
+    [/farmatodo|cruz verde|locatel|drogueri|farmacia|\beps\b|colsanitas|sanitas|compensar|clinica|hospital|laboratorio|odontolog|medic/, "Salud"],
+    [/arriendo|administracion|inmobiliaria|predial|hipoteca/, "Vivienda"],
+    [/colegio|universidad|matricula|icetex|platzi|udemy|coursera|libreria/, "Educación"],
+    [/restaurante|crepes|frisby|\bkfc\b|mcdonald|burger|el corral|subway|starbucks|juan valdez|tostao|\boma\b|\bwok\b|pizza|sushi|\bcafe\b/, "Restaurantes"],
+    [/cine colombia|cinecolombia|procinal|cinemark|steam|playstation|xbox|nintendo|tuboleta|eticket|concierto/, "Entretenimiento"],
+    [/falabella|\bzara\b|h&m|arturo calle|studio f|\bkoaj\b|tennis|adidas|nike|totto|peluquer|barberia|sephora/, "Ropa y cuidado"],
+    [/interes|cuota de manejo|cuota manejo|comision|\bgmf\b|4x1000|4 x 1000|gravamen|seguro deudor/, "Intereses y comisiones"],
+    [/\bdian\b|impuesto|retencion|retefuente/, "Impuestos"],
+    [/donacion|fundacion|unicef|cruz roja|diezmo|ofrenda/, "Donaciones"],
+    [/pago (de )?(credito|prestamo|cuota)|abono a credito|cuota credito|libranza/, "Cuotas de deudas"],
+  ];
+  const DICC_INGRESO = [
+    [/nomina|salario|sueldo|payroll/, "Salario"],
+    [/honorario/, "Honorarios"],
+    [/rendimiento|dividendo|\bcdt\b|intereses ganados/, "Inversiones"],
+    [/arriendo|canon/, "Arriendo recibido"],
+  ];
+  const PAGO_TC = /pago (de |a )?(tarjeta|tc\b|t\.c|visa|master|amex|diners)|abono (a )?tarjeta|pago tarj/;
+  const STOP = new Set("compra compras pago pagos por para con del los las pse transaccion trans debito credito automatico pos cop col bogota medellin cali barranquilla ltda sas www com internet tarjeta visa mastercard web app colombia online nro ref referencia cta cuenta".split(" "));
+  function palabras(desc) { return norm(desc).replace(/[^a-z ]/g, " ").split(/\s+/).filter(w => w.length >= 3 && !STOP.has(w)) }
+  function claveRegla(desc) { return palabras(desc).slice(0, 2).join(" ") }
+  // Devuelve {categoria, fuente} o null si no hay coincidencia
+  function categorizar(desc, tipo) {
+    const words = new Set(palabras(desc));
+    let best = null;
+    for (const r of S.reglas) {
+      if (r.tipo !== tipo) continue;
+      const pw = r.patron.split(" ");
+      if (pw.every(w => words.has(w)) && (!best || pw.length > best.n)) best = { n: pw.length, categoria: r.categoria };
+    }
+    if (best) return { categoria: best.categoria, fuente: "regla" };
+    const t = norm(desc);
+    for (const [re, c] of tipo === "gasto" ? DICC_GASTO : DICC_INGRESO) if (re.test(t)) return { categoria: c, fuente: "dicc" };
+    return null;
+  }
+
+  // Lectura de archivos
+  let xlsxP = null;
+  function loadXLSX() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    return xlsxP ||= new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+      s.onload = () => res(window.XLSX); s.onerror = () => { xlsxP = null; rej(new Error("xlsx")) };
+      document.head.appendChild(s);
+    });
+  }
+  function decodeText(buf) {
+    let t = new TextDecoder("utf-8").decode(buf);
+    if (t.includes("�")) t = new TextDecoder("windows-1252").decode(buf);
+    return t.replace(/^﻿/, "");
+  }
+  function parseCSV(text) {
+    const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 30);
+    const delim = [";", ",", "\t", "|"].map(d => [d, lines.reduce((s, l) => s + l.split(d).length - 1, 0)]).sort((a, b) => b[1] - a[1])[0][0];
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++ } else q = false } else cell += ch; continue }
+      if (ch === '"') q = true;
+      else if (ch === delim) { row.push(cell); cell = "" }
+      else if (ch === "\n" || ch === "\r") { if (ch === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = "" }
+      else cell += ch;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row) }
+    return rows.map(r => r.map(c => c.trim())).filter(r => r.some(c => c !== ""));
+  }
+  async function leerArchivo(file) {
+    const buf = await file.arrayBuffer();
+    if (/\.(csv|txt)$/i.test(file.name)) return parseCSV(decodeText(buf));
+    const XLSX = await loadXLSX();
+    const wb = XLSX.read(buf, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" }).filter(r => r.some(c => String(c).trim() !== ""));
+  }
+  const MESES = { ene: 1, jan: 1, feb: 2, mar: 3, abr: 4, apr: 4, may: 5, jun: 6, jul: 7, ago: 8, aug: 8, sep: 9, set: 9, oct: 10, nov: 11, dic: 12, dec: 12 };
+  function parseFecha(v) {
+    const pad = n => String(n).padStart(2, "0");
+    const ok = (y, m, d) => (y > 1990 && y < 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31) ? `${y}-${pad(m)}-${pad(d)}` : null;
+    if (typeof v === "number") {
+      if (v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 864e5)); return ok(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()) }
+      if (v > 19900101 && v < 21000101) { const s = String(v); return ok(+s.slice(0, 4), +s.slice(4, 6), +s.slice(6, 8)) }
+      return null;
+    }
+    const s = norm(v).trim();
+    let m;
+    if ((m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/))) return ok(+m[1], +m[2], +m[3]);
+    if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/))) {
+      let a = +m[1], b = +m[2], y = +m[3]; if (y < 100) y += 2000;
+      if (b > 12 && a <= 12) [a, b] = [b, a]; // venía mes/día
+      return ok(y, b, a);
+    }
+    if ((m = s.match(/^(\d{1,2})[\s\-/.]*([a-z]{3})[a-z]*\.?[\s\-/.]*(\d{2,4})/)) && MESES[m[2]]) { let y = +m[3]; if (y < 100) y += 2000; return ok(y, MESES[m[2]], +m[1]) }
+    if ((m = s.match(/^(\d{4})(\d{2})(\d{2})$/))) return ok(+m[1], +m[2], +m[3]);
+    return null;
+  }
+  function parseValor(v) {
+    if (typeof v === "number") return v;
+    let s = String(v ?? "").trim();
+    if (!s) return NaN;
+    let neg = false;
+    if (/^\(.*\)$/.test(s)) { neg = true; s = s.slice(1, -1) }
+    if (/-\s*$/.test(s)) { neg = true; s = s.replace(/-\s*$/, "") }
+    let n = parseAmount(s);
+    if (Number.isNaN(n)) return NaN;
+    return neg ? -Math.abs(n) : n;
+  }
+  const KW = {
+    fecha: /fecha|date|^dia$|f\. ?(trans|mov)/,
+    desc: /descrip|concepto|detalle|movimiento|referencia|transacc|comercio|establec|nombre|narrat/,
+    debito: /debito|cargo|retiro|egreso|salida|^debe$|debitos/,
+    credito: /credito|abono|deposito|ingreso|entrada|^haber$|creditos/,
+    valor: /valor|monto|importe|amount|total|cop/,
+  };
+  function detectar(rows) {
+    let hdr = -1, best = 0;
+    rows.slice(0, 15).forEach((r, i) => {
+      const sc = r.reduce((s, c) => s + (typeof c === "string" && Object.values(KW).some(re => re.test(norm(c))) ? 1 : 0), 0);
+      if (sc > best) { best = sc; hdr = i }
+    });
+    if (best < 2) hdr = -1;
+    const heads = hdr >= 0 ? rows[hdr].map(c => norm(c)) : [];
+    const map = { fecha: "", desc: "", valor: "", debito: "", credito: "" };
+    const used = new Set();
+    for (const k of ["fecha", "debito", "credito", "desc", "valor"]) {
+      const i = heads.findIndex((h, j) => !used.has(j) && h && KW[k].test(h) && !(k === "valor" && /saldo/.test(h)));
+      if (i > -1) { map[k] = String(i); used.add(i) }
+    }
+    const data = rows.slice(hdr + 1);
+    const ncol = Math.max(...rows.map(r => r.length));
+    // Sin encabezados: adivinar por contenido
+    if (!map.fecha) { for (let j = 0; j < ncol; j++) if (data.slice(0, 10).filter(r => parseFecha(r[j])).length >= Math.min(3, data.length)) { map.fecha = String(j); used.add(j); break } }
+    if (!map.valor && !map.debito && !map.credito) { for (let j = ncol - 1; j >= 0; j--) if (!used.has(j) && data.slice(0, 10).filter(r => !Number.isNaN(parseValor(r[j])) && String(r[j]).trim() !== "").length >= Math.min(3, data.length)) { map.valor = String(j); used.add(j); break } }
+    if (!map.desc) { let bj = -1, bl = 0; for (let j = 0; j < ncol; j++) { if (used.has(j)) continue; const l = data.slice(0, 10).reduce((s, r) => s + String(r[j] ?? "").length, 0); if (l > bl) { bl = l; bj = j } } if (bj > -1) map.desc = String(bj) }
+    if (map.debito && map.credito) map.valor = "";
+    const cols = Array.from({ length: ncol }, (_, j) => [String(j), hdr >= 0 && rows[hdr][j] !== "" ? String(rows[hdr][j]) : `Columna ${j + 1}`]);
+    return { hdr, map, cols, data };
+  }
+
+  // Asistente de importación
+  const IMP = { step: 1, cuentaId: "", file: "", rows: null, det: null, invert: false, items: [], recordar: true, busy: false };
+  function openImport(cuentaId) {
+    if (!S.cuentas.length) { openAcc(); return }
+    Object.assign(IMP, { step: 1, cuentaId: cuentaId || S.filt.cuenta || S.cuentas[0].id, file: "", rows: null, det: null, items: [], busy: false });
+    renderImp(); $("impDlg").showModal();
+  }
+  function itemsDesde() {
+    const { map, data } = IMP.det, out = [];
+    const cta = cuentaById(IMP.cuentaId), card = isCard(cta);
+    data.forEach((r, i) => {
+      const fecha = parseFecha(r[+map.fecha]);
+      let v;
+      if (map.debito || map.credito) {
+        const d = map.debito ? Math.abs(parseValor(r[+map.debito]) || 0) : 0, c = map.credito ? Math.abs(parseValor(r[+map.credito]) || 0) : 0;
+        v = c - d;
+      } else v = parseValor(r[+map.valor]);
+      if (!fecha || !v || Number.isNaN(v)) return;
+      if (IMP.invert) v = -v;
+      const desc = String(map.desc ? r[+map.desc] : "").replace(/\s+/g, " ").trim().slice(0, 140);
+      const tipo = v < 0 ? "gasto" : "ingreso", monto = Math.round(Math.abs(v) * 100) / 100;
+      let cat = null, fuente = "";
+      const cards = S.cuentas.filter(isCard);
+      if (!card && tipo === "gasto" && PAGO_TC.test(norm(desc)) && cards.length === 1) { cat = "t:" + cards[0].id; fuente = "dicc" }
+      else { const g = categorizar(desc, tipo); if (g) { cat = g.categoria; fuente = g.fuente } }
+      const it = { i, fecha, desc, tipo, monto, cat: cat || (tipo === "gasto" ? "Otros gastos" : "Otros ingresos"), fuente, cambiada: false, incluir: true, nota: "" };
+      if (card && tipo === "ingreso") { it.incluir = false; it.nota = "Pago o abono a la tarjeta: regístralo como transferencia desde tu banco" }
+      const dup = S.movs.some(m => (m.cuentaId === IMP.cuentaId || m.cuentaDestinoId === IMP.cuentaId) && Math.abs((Number(m.monto) || 0) - monto) < 1 && Math.abs(diasEntre(m.fecha, fecha)) <= 1);
+      if (dup) { it.incluir = false; it.nota = "Posible duplicado: ya existe un movimiento igual" }
+      out.push(it);
+    });
+    return out;
+  }
+  function diasEntre(a, b) { return Math.round((new Date(a + "T12:00:00") - new Date(b + "T12:00:00")) / 864e5) }
+  function catOptions(it) {
+    const otras = S.cuentas.filter(c => c.id !== IMP.cuentaId);
+    const cats = CATS[it.tipo].map(([c]) => [c, c]);
+    const tr = otras.map(c => ["t:" + c.id, (it.tipo === "gasto" ? "→ Transferencia a " : "← Transferencia desde ") + c.nombre]);
+    return [...cats, ...tr].map(([v, t]) => `<option value="${esc(v)}" ${v === it.cat ? "selected" : ""}>${esc(t)}</option>`).join("");
+  }
+  function impResumen() {
+    const sel = IMP.items.filter(x => x.incluir);
+    const g = sel.filter(x => x.tipo === "gasto" && !x.cat.startsWith("t:")), n = sel.filter(x => x.tipo === "ingreso" && !x.cat.startsWith("t:")), t = sel.filter(x => x.cat.startsWith("t:"));
+    const cur = cuentaById(IMP.cuentaId)?.moneda || "COP";
+    return `Se importarán <b>${sel.length}</b> movimientos: ${g.length} gastos (${money(g.reduce((s, x) => s + x.monto, 0), cur)}), ${n.length} ingresos (${money(n.reduce((s, x) => s + x.monto, 0), cur)})${t.length ? ` y ${t.length} transferencias` : ""}.`;
+  }
+  function renderImp() {
+    const b = $("impBody"), cta = cuentaById(IMP.cuentaId);
+    $("impSteps").innerHTML = ["Archivo", "Columnas", "Revisión"].map((s, i) => `<span class="${IMP.step === i + 1 ? "on" : IMP.step > i + 1 ? "done" : ""}">${i + 1}. ${s}</span>`).join("");
+    if (IMP.step === 1) {
+      b.innerHTML = `<div class="form-grid">
+          <label class="f full">¿De qué cuenta es el extracto? <select id="impCta">${S.cuentas.map(c => `<option value="${c.id}" ${c.id === IMP.cuentaId ? "selected" : ""}>${esc(c.nombre)} (${c.moneda})</option>`).join("")}</select></label>
+        </div>
+        <label class="drop" id="impDrop"><input type="file" id="impFile" accept=".csv,.txt,.xlsx,.xls"><b>Elige o arrastra el extracto</b><span class="hint">CSV o Excel (.xlsx, .xls) descargado de tu banco. El archivo se lee en tu navegador y no se sube a ningún lado.</span></label>
+        <p class="err" id="impErr"></p>
+        <div class="actions" style="margin:0"><button type="button" class="btn" data-imp="close">Cancelar</button></div>`;
+      return;
+    }
+    if (IMP.step === 2) {
+      const { map, cols } = IMP.det, opt = (k) => `<option value="">— Ninguna —</option>` + cols.map(([v, t]) => `<option value="${v}" ${map[k] === v ? "selected" : ""}>${esc(t)}</option>`).join("");
+      const prev = itemsDesde().slice(0, 6);
+      const total = IMP.det.data.length, validos = itemsDesde().length;
+      b.innerHTML = `<p class="hint" style="margin:0">Archivo: <b>${esc(IMP.file)}</b> · ${total} filas. Revisa que cada dato esté en la columna correcta.</p>
+        <div class="form-grid">
+          <label class="f">Fecha <select data-map="fecha">${opt("fecha")}</select></label>
+          <label class="f">Descripción <select data-map="desc">${opt("desc")}</select></label>
+          <label class="f">Valor (una sola columna) <select data-map="valor">${opt("valor")}</select></label>
+          <label class="f">o Débitos <select data-map="debito">${opt("debito")}</select></label>
+          <label class="f">y Créditos <select data-map="credito">${opt("credito")}</select></label>
+          <label class="check" style="align-self:end"><input type="checkbox" id="impInv" ${IMP.invert ? "checked" : ""}> Los gastos vienen en positivo</label>
+        </div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fecha</th><th>Descripción</th><th>Tipo</th><th class="r">Valor</th></tr></thead><tbody>
+          ${prev.length ? prev.map(x => `<tr><td class="num">${x.fecha}</td><td>${esc(x.desc)}</td><td>${x.tipo === "gasto" ? "Gasto" : "Ingreso"}</td><td class="r num ${x.tipo === "gasto" ? "neg" : "pos"}">${x.tipo === "gasto" ? "−" : "+"}${money(x.monto, cta?.moneda)}</td></tr>`).join("") : `<tr><td colspan="4" class="hint">Ninguna fila tiene fecha y valor válidos con estas columnas.</td></tr>`}
+        </tbody></table></div>
+        <p class="hint" style="margin:0">${validos} de ${total} filas se pueden importar${total - validos ? `; ${total - validos} sin fecha o valor válidos se omiten (encabezados, saldos, totales)` : ""}.</p>
+        <div class="actions" style="margin:0"><button type="button" class="btn left" data-imp="back">Atrás</button><button type="button" class="btn" data-imp="close">Cancelar</button><button type="button" class="btn primary" data-imp="next" ${validos ? "" : "disabled"}>Continuar</button></div>`;
+      return;
+    }
+    const auto = IMP.items.filter(x => x.fuente).length;
+    b.innerHTML = `<p class="hint" style="margin:0">${auto} de ${IMP.items.length} movimientos se categorizaron solos. Revisa los marcados como “Revisar” y cambia lo que haga falta.</p>
+      <label class="check"><input type="checkbox" id="impRec" ${IMP.recordar ? "checked" : ""}> Recordar las categorías que cambie para próximas importaciones</label>
+      <div class="tbl-wrap imp-tbl"><table class="tbl"><thead><tr><th></th><th>Fecha</th><th>Descripción</th><th>Categoría</th><th class="r">Valor</th></tr></thead><tbody>
+        ${IMP.items.map((x, k) => `<tr class="${x.incluir ? "" : "off"}"><td><input type="checkbox" data-inc="${k}" ${x.incluir ? "checked" : ""} aria-label="Incluir"></td><td class="num" style="white-space:nowrap">${fechaCorta(x.fecha)}</td>
+          <td><span>${esc(x.desc || "(sin descripción)")}</span>${x.nota ? `<span class="hint" style="display:block">${esc(x.nota)}</span>` : ""}${!x.fuente && !x.nota ? ' <span class="tag">Revisar</span>' : ""}</td>
+          <td><select data-cat="${k}">${catOptions(x)}</select></td>
+          <td class="r num ${x.tipo === "gasto" ? "neg" : "pos"}" style="white-space:nowrap">${x.tipo === "gasto" ? "−" : "+"}${money(x.monto, cta?.moneda)}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="hint" id="impSum" style="margin:0">${impResumen()}</p>
+      <div class="prog" id="impProg" hidden><b></b></div>
+      <p class="err" id="impErr"></p>
+      <div class="actions" style="margin:0"><button type="button" class="btn left" data-imp="back">Atrás</button><button type="button" class="btn" data-imp="close">Cancelar</button><button type="button" class="btn primary" data-imp="save">Importar</button></div>`;
+  }
+  async function impArchivo(file) {
+    if (!file) return;
+    const err = (t) => { const e = $("impErr"); if (e) e.textContent = t };
+    try {
+      err("Leyendo archivo…");
+      const rows = await leerArchivo(file);
+      if (!rows.length) return err("El archivo está vacío.");
+      IMP.file = file.name; IMP.rows = rows; IMP.det = detectar(rows);
+      IMP.invert = isCard(cuentaById(IMP.cuentaId));
+      IMP.step = 2; renderImp();
+    } catch (e) {
+      err(e?.message === "xlsx" ? "No se pudo cargar el lector de Excel. Guarda el archivo como CSV desde Excel e inténtalo de nuevo." : "No pude leer el archivo. Verifica que sea un CSV o Excel de tu banco.");
+    }
+  }
+  async function putMany(kind, docs, onProgress) {
+    if (S.mode !== "db") {
+      for (const { id, data } of docs) { const i = S[kind].findIndex(x => x.id === id); if (i > -1) S[kind][i] = { ...data, id }; else S[kind].push({ ...data, id }) }
+      saveLocal(); onProgress?.(docs.length); render(); return;
+    }
+    let next = 0, done = 0;
+    const worker = async () => { while (next < docs.length) { const { id, data } = docs[next++]; await db.collection(COL[kind]).doc(id).set(data); onProgress?.(++done) } };
+    await Promise.all(Array.from({ length: Math.min(4, docs.length) }, worker));
+  }
+  async function delMany(kind, ids, onProgress) {
+    if (S.mode !== "db") { const set = new Set(ids); S[kind] = S[kind].filter(x => !set.has(x.id)); saveLocal(); render(); return }
+    let next = 0, done = 0;
+    const worker = async () => { while (next < ids.length) { await db.collection(COL[kind]).doc(ids[next++]).delete(); onProgress?.(++done) } };
+    await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+  }
+  async function impGuardar() {
+    if (IMP.busy) return;
+    const sel = IMP.items.filter(x => x.incluir);
+    if (!sel.length) { $("impErr").textContent = "No hay movimientos seleccionados."; return }
+    const cta = cuentaById(IMP.cuentaId), lote = "imp-" + uid(), now = Date.now();
+    const docs = sel.map((x, k) => {
+      const base = { fecha: x.fecha, monto: x.monto, moneda: cta.moneda, nota: x.desc, importado: lote, creado: now + k };
+      if (cta.moneda !== "COP") base.tasa = tasaDe(cta.moneda);
+      if (x.cat.startsWith("t:")) {
+        const otra = x.cat.slice(2);
+        const d = x.tipo === "gasto" ? { cuentaId: cta.id, cuentaDestinoId: otra } : { cuentaId: otra, cuentaDestinoId: cta.id };
+        const o = cuentaById(d.cuentaId), de = cuentaById(d.cuentaDestinoId);
+        if (o && de && o.moneda !== de.moneda) d.montoDestino = Math.round(toBase(x.monto, o.moneda) / (tasaDe(de.moneda) || 1) * 100) / 100;
+        return { id: uid() + k, data: { ...base, ...d, tipo: "transferencia", categoria: "Transferencia" } };
+      }
+      return { id: uid() + k, data: { ...base, cuentaId: cta.id, tipo: x.tipo, categoria: x.cat, prescindible: x.tipo === "gasto" && ESENCIAL[x.cat] === false, deducible: x.cat === "Donaciones" } };
+    });
+    const reglas = [];
+    if (IMP.recordar) {
+      const vistos = new Set();
+      for (const x of IMP.items) {
+        if (!x.cambiada || x.cat.startsWith("t:")) continue;
+        const patron = claveRegla(x.desc); if (!patron || vistos.has(patron + x.tipo)) continue;
+        vistos.add(patron + x.tipo);
+        reglas.push({ id: slug(x.tipo + "-" + patron), data: { patron, tipo: x.tipo, categoria: x.cat, creado: now } });
+      }
+    }
+    IMP.busy = true;
+    const prog = $("impProg"), bar = prog.querySelector("b"); prog.hidden = false;
+    $("impBody").querySelectorAll("button,select,input").forEach(e => e.disabled = true);
+    try {
+      await putMany("movs", docs, (n) => { bar.style.width = (n / docs.length * 100) + "%" });
+      if (reglas.length) await putMany("reglas", reglas);
+      await registrarAnios(docs.map(d => d.data.fecha));
+      $("impDlg").close();
+      S.tab = "movimientos"; S.filt.cuenta = cta.id;
+      const meses = docs.map(d => d.data.fecha.slice(0, 7)).sort(); S.month = meses[meses.length - 1];
+      render(); toast(`${docs.length} movimientos importados${reglas.length ? ` · ${reglas.length} reglas nuevas` : ""}`);
+    } catch (e) {
+      $("impErr").textContent = writeErr(e) + " Lo que alcanzó a guardarse se puede deshacer desde Movimientos.";
+      $("impBody").querySelectorAll("button,select,input").forEach(e => e.disabled = false);
+    } finally { IMP.busy = false }
+  }
+  function lotes() {
+    const m = {};
+    for (const x of S.movs) if (x.importado) { const l = (m[x.importado] ||= { id: x.importado, n: 0, desde: x.fecha, hasta: x.fecha, cuentaId: x.cuentaDestinoId && x.tipo === "transferencia" && !cuentaById(x.cuentaId) ? x.cuentaDestinoId : x.cuentaId, creado: x.creado }); l.n++; if (x.fecha < l.desde) l.desde = x.fecha; if (x.fecha > l.hasta) l.hasta = x.fecha }
+    return Object.values(m).sort((a, b) => (b.creado || 0) - (a.creado || 0)).slice(0, 5);
+  }
+  async function deshacerLote(id) {
+    const ids = S.movs.filter(m => m.importado === id).map(m => m.id);
+    try { await delMany("movs", ids); toast(`Importación deshecha: ${ids.length} movimientos eliminados`) } catch (e) { toast(writeErr(e)) }
+  }
+  async function registrarAnios(fechas) {
+    const cur = new Set((S.config.anios || []).map(String));
+    const nuevos = [...new Set(fechas.map(f => f.slice(0, 4)))].filter(y => !cur.has(y));
+    if (!nuevos.length) return;
+    await putConfig({ anios: [...cur, ...nuevos].sort() });
+  }
+
   // ---------- Diálogo de movimientos ----------
   let editMov = null, tipoSel = "gasto";
   function fillSelect(sel, items, val) { sel.innerHTML = items.map(([v, t]) => `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("") }
@@ -1043,6 +1427,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     const o = cuentaById($("fCuenta").value), d = cuentaById($("fDest").value);
     $("wrapMontoDest").hidden = !(tipoSel === "transferencia" && o && d && o.moneda !== d.moneda);
     $("wrapCuotas").hidden = !(tipoSel === "gasto" && isCard(o));
+    const ext = tipoSel !== "transferencia" && o && o.moneda !== "COP";
+    $("wrapTasa").hidden = !ext;
+    if (ext) { $("lblTasa").textContent = `Tasa (1 ${o.moneda} en pesos)`; if (!$("fTasa").value || $("fTasa").dataset.auto) { $("fTasa").value = String(editMov?.tasa || tasaDe(o.moneda)); $("fTasa").dataset.auto = "1" } }
+  }
+  let catTocada = false, notaT;
+  function sugerirCat() {
+    if (editMov || catTocada || tipoSel === "transferencia") return;
+    const g = categorizar($("fNota").value, tipoSel);
+    if (g && CATS[tipoSel].some(([c]) => c === g.categoria)) { $("fCat").value = g.categoria; autoPresc() }
   }
   function openMov(m) {
     if (!S.cuentas.length) { openAcc(); return }
@@ -1058,6 +1451,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     $("fFecha").value = m?.fecha || (S.month === t.slice(0, 7) ? t : S.month + "-01");
     $("fNota").value = m?.nota || "";
     $("fCuotas").value = String(m?.cuotas || 1);
+    catTocada = false; $("fTasa").value = m?.tasa ? String(m.tasa) : ""; $("fTasa").dataset.auto = m?.tasa ? "" : "1";
     $("fCat").innerHTML = "";
     setTipo(m?.tipo || "gasto");
     if (m?.categoria) $("fCat").value = m.categoria;
@@ -1087,6 +1481,12 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     const cuentaId = $("fCuenta").value, c = cuentaById(cuentaId);
     const data = { tipo: tipoSel, monto, fecha, cuentaId, moneda: c?.moneda || "COP", nota: $("fNota").value.trim(), creado: editMov?.creado || Date.now() };
     if (editMov?.ejemplo) data.ejemplo = true;
+    if (editMov?.importado) data.importado = editMov.importado;
+    if (!$("wrapTasa").hidden) {
+      const tz = parseAmount($("fTasa").value);
+      if (!(tz > 0)) { $("movErr").textContent = "Escribe la tasa de cambio, por ejemplo 4100."; return }
+      data.tasa = tz;
+    }
     if (tipoSel === "transferencia") {
       const dId = $("fDest").value;
       if (dId === cuentaId) { $("movErr").textContent = "La cuenta de destino debe ser distinta a la de origen."; return }
@@ -1110,6 +1510,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     $("movSave").disabled = true;
     try {
       await put("movs", editMov?.id || uid(), data);
+      registrarAnios([fecha]).catch(() => { });
       $("movDlg").close(); toast(editMov ? "Movimiento actualizado" : "Movimiento guardado");
       if (fecha.slice(0, 7) !== S.month) { S.month = fecha.slice(0, 7); render() }
     } catch (e) { $("movErr").textContent = writeErr(e) }
@@ -1221,6 +1622,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
   $("view").addEventListener("click", e => {
     const t = e.target.closest("button"); if (!t) return;
     const ds = t.dataset;
+    if (ds.importAcc) return openImport(ds.importAcc);
+    if (ds.undoLote) { if (!ds.confirm) { ds.confirm = "1"; t.textContent = "¿Seguro? Toca otra vez"; return } return deshacerLote(ds.undoLote) }
+    if (ds.delRegla) { return del("reglas", ds.delRegla).then(() => toast("Regla eliminada"), e => toast(writeErr(e))) }
     if (ds.abono) return openAbono(S.deudas.find(d => d.id === ds.abono));
     if (ds.editDeuda) return openDeuda(S.deudas.find(d => d.id === ds.editDeuda));
     if (ds.hist) { S.histOpen = S.histOpen === ds.hist ? null : ds.hist; return render() }
@@ -1244,7 +1648,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     else if (a === "new-mov") openMov();
     else if (a === "seed") seed();
     else if (a === "unseed") unseed();
-    else if (a === "save-cfg") { const v = parseAmount($("cfgTasa").value); if (v > 0) putConfig({ tasaUSD: v }).then(() => toast("Tasa guardada"), e => toast(writeErr(e))); else toast("Escribe una tasa válida, por ejemplo 4100") }
+    else if (a === "save-cfg") { const u = parseAmount($("cfgUSD").value), e2 = parseAmount($("cfgEUR").value); if (u > 0 && e2 > 0) putConfig({ tasaUSD: u, tasas: { USD: u, EUR: e2 } }).then(() => toast("Tasas guardadas"), e => toast(writeErr(e))); else toast("Escribe tasas válidas, por ejemplo 4100 y 4450") }
+    else if (a === "import") openImport();
   });
   let qT;
   $("view").addEventListener("input", e => {
@@ -1255,7 +1660,32 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: .86rem; min-width
     if (e.target.id === "fc") { S.filt.cuenta = e.target.value; render() }
   });
   $("tipoSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTipo(b.dataset.v) });
-  $("fCat").addEventListener("change", autoPresc);
+  $("fCat").addEventListener("change", () => { catTocada = true; autoPresc() });
+  $("fNota").addEventListener("input", () => { clearTimeout(notaT); notaT = setTimeout(sugerirCat, 250) });
+  $("fTasa").addEventListener("input", () => { $("fTasa").dataset.auto = "" });
+  // Importación
+  $("impDlg").addEventListener("click", e => {
+    const b = e.target.closest("[data-imp]"); if (!b) return;
+    const a = b.dataset.imp;
+    if (a === "close") { if (!IMP.busy) $("impDlg").close() }
+    else if (a === "back") { IMP.step = Math.max(1, IMP.step - 1); renderImp() }
+    else if (a === "next") { IMP.items = itemsDesde(); IMP.step = 3; renderImp() }
+    else if (a === "save") impGuardar();
+  });
+  $("impDlg").addEventListener("change", e => {
+    const t = e.target;
+    if (t.id === "impCta") IMP.cuentaId = t.value;
+    else if (t.id === "impFile") impArchivo(t.files[0]);
+    else if (t.dataset.map) { IMP.det.map[t.dataset.map] = t.value; if (t.value && t.dataset.map === "valor") { IMP.det.map.debito = ""; IMP.det.map.credito = "" } if (t.value && (t.dataset.map === "debito" || t.dataset.map === "credito")) IMP.det.map.valor = ""; renderImp() }
+    else if (t.id === "impInv") { IMP.invert = t.checked; renderImp() }
+    else if (t.id === "impRec") IMP.recordar = t.checked;
+    else if (t.dataset.inc) { const it = IMP.items[+t.dataset.inc]; it.incluir = t.checked; t.closest("tr").classList.toggle("off", !t.checked); $("impSum").innerHTML = impResumen() }
+    else if (t.dataset.cat) { const it = IMP.items[+t.dataset.cat]; it.cat = t.value; it.cambiada = true; $("impSum").innerHTML = impResumen() }
+  });
+  $("impDlg").addEventListener("dragover", e => { const d = e.target.closest?.("#impDrop"); if (d) { e.preventDefault(); d.classList.add("over") } });
+  $("impDlg").addEventListener("dragleave", e => { e.target.closest?.("#impDrop")?.classList.remove("over") });
+  $("impDlg").addEventListener("drop", e => { const d = e.target.closest?.("#impDrop"); if (d) { e.preventDefault(); d.classList.remove("over"); impArchivo(e.dataTransfer.files[0]) } });
+  $("impDlg").addEventListener("cancel", e => { if (IMP.busy) e.preventDefault() });
   $("aTipo").addEventListener("change", syncAccTipo);
   $("fCuenta").addEventListener("change", syncDest);
   $("fDest").addEventListener("change", syncDest);

@@ -74,3 +74,11 @@ Cada fase se publica en la misma URL del artefacto y se commitea en `claude/eleg
 - Metas: progreso, aporte mensual necesario, estado (a tiempo / atrasada / vencida / lograda) y comparación con el ahorro promedio.
 - Los préstamos recibidos/otorgados y sus cobros no cuentan como ingreso ni gasto del mes. El patrimonio neto ya resta deudas y suma lo que te deben.
 - Nuevas alertas en el Resumen: presupuestos al 80% o excedidos, pagos y cobros próximos o atrasados, metas atrasadas.
+
+## Fase 3 entregada (v0.3)
+- Importar extractos CSV/Excel en 3 pasos (archivo → columnas → revisión). Detecta encabezados, fechas (dd/mm/aaaa, aaaa-mm-dd, "05 oct 2026", seriales de Excel), montos colombianos ("1.234.567,89", negativos entre paréntesis) y columnas de débito/crédito separadas.
+- Categorización automática con diccionario de comercios colombianos y reglas aprendidas (colección `reglas`) al corregir categorías. También sugiere la categoría al escribir la nota en el formulario manual.
+- Duplicados marcados y excluidos por defecto; pagos a tarjeta detectados como transferencias; en extractos de tarjeta los pagos recibidos se excluyen.
+- "Deshacer importación" por lote desde Movimientos.
+- Multimoneda COP/USD/EUR: cada movimiento en moneda extranjera guarda su tasa; los saldos usan la tasa configurada.
+- Movimientos suscritos por año (hasta 1000 por año) para soportar historiales grandes.
