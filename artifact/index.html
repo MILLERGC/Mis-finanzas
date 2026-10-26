@@ -214,6 +214,10 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px }
 .ask { display: flex; gap: 8px; flex-wrap: wrap }
 .ask input { flex: 1 1 220px; min-width: 0 }
+.month-tbl { min-width: 620px }
+.month-tbl th:first-child, .month-tbl td:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1 }
+.month-tbl .cur { background: var(--accent-soft) }
+.month-tbl tr.tot td { border-top: 2px solid var(--line); font-weight: 600 }
 .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: end }
 @media (prefers-reduced-motion: no-preference) { .kpi, .panel { transition: border-color .2s } }
 </style>
@@ -346,12 +350,21 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     ingreso: [["Salario", true], ["Honorarios", true], ["Negocio", true], ["Inversiones", true], ["Arriendo recibido", true], ["Préstamo recibido", true], ["Cobro de préstamo", true], ["Otros ingresos", true]]
   };
   const ESENCIAL = Object.fromEntries(CATS.gasto);
+  const CATS_BASE = { gasto: [...CATS.gasto], ingreso: [...CATS.ingreso] };
+  // Las categorías creadas por el usuario van primero; las de fábrica después
+  function aplicarCategorias() {
+    for (const t of ["gasto", "ingreso"]) {
+      const propias = S.categorias.filter(x => x.tipo === t && !CATS_BASE[t].some(([c]) => c === x.nombre)).sort((a, b) => a.nombre.localeCompare(b.nombre)).map(x => [x.nombre, !!x.esencial]);
+      CATS[t] = [...propias, ...CATS_BASE[t]];
+    }
+    for (const [c, e] of CATS.gasto) ESENCIAL[c] = e;
+  }
   const TIPO_CUENTA = { banco: "Banco", billetera: "Billetera digital", efectivo: "Efectivo", tarjeta: "Tarjeta de crédito", inversion: "Inversión" };
 
   // ---------- Estado ----------
   const S = {
     mode: "loading", // db | local | loading
-    cuentas: [], movs: [], pres: [], deudas: [], metas: [], reglas: [], config: { tasaUSD: 4000, monedaBase: "COP", anios: [] },
+    cuentas: [], movs: [], pres: [], deudas: [], metas: [], reglas: [], categorias: [], config: { tasaUSD: 4000, monedaBase: "COP", anios: [] },
     estrategia: "avalancha", histOpen: null, chat: [], asesor: null, iaBusy: null, iaErr: "", anioFiscal: null, agendando: null,
     tab: "resumen", month: ym(new Date()),
     filt: { tipo: "", cuenta: "", q: "" },
@@ -498,10 +511,10 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
   // ---------- Almacenamiento ----------
   const LS_KEY = "mis-finanzas-local-v1";
   function loadLocal() {
-    try { const d = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (d) { S.cuentas = d.cuentas || []; S.movs = d.movs || []; S.pres = d.pres || []; S.deudas = d.deudas || []; S.metas = d.metas || []; S.reglas = d.reglas || []; S.asesor = d.asesor || null; S.config = { ...S.config, ...(d.config || {}) } } } catch (e) { }
+    try { const d = JSON.parse(localStorage.getItem(LS_KEY) || "null"); if (d) { S.cuentas = d.cuentas || []; S.movs = d.movs || []; S.pres = d.pres || []; S.deudas = d.deudas || []; S.metas = d.metas || []; S.reglas = d.reglas || []; S.categorias = d.categorias || []; S.asesor = d.asesor || null; S.config = { ...S.config, ...(d.config || {}) } } } catch (e) { }
   }
-  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ cuentas: S.cuentas, movs: S.movs, pres: S.pres, deudas: S.deudas, metas: S.metas, reglas: S.reglas, asesor: S.asesor, config: S.config })) } catch (e) { } }
-  const COL = { cuentas: "cuentas", movs: "movimientos", pres: "presupuestos", deudas: "deudas", metas: "metas", reglas: "reglas" };
+  function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify({ cuentas: S.cuentas, movs: S.movs, pres: S.pres, deudas: S.deudas, metas: S.metas, reglas: S.reglas, categorias: S.categorias, asesor: S.asesor, config: S.config })) } catch (e) { } }
+  const COL = { cuentas: "cuentas", movs: "movimientos", pres: "presupuestos", deudas: "deudas", metas: "metas", reglas: "reglas", categorias: "categorias" };
 
   async function put(kind, id, data) {
     if (S.mode === "db") { await db.collection(COL[kind]).doc(id).set(data); return }
@@ -526,7 +539,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     let cap = null;
     try { cap = window.claude?.use ? await window.claude.use("db") : null } catch (e) { cap = null }
     if (!cap) {
-      S.mode = "local"; loadLocal(); setStatus("Modo local: solo en este navegador", "warn"); render(); return;
+      S.mode = "local"; loadLocal(); aplicarCategorias(); setStatus("Modo local: solo en este navegador", "warn"); render(); return;
     }
     db = cap; S.mode = "db"; setStatus("Sincronizado", "ok");
     const onErr = (e) => { setStatus(e?.code === "revoked" ? "Sin acceso a los datos" : "Error de sincronización", "warn") };
@@ -538,6 +551,7 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
     const yNow = new Date().getFullYear();
     S.suscribirAnios([String(yNow), String(yNow - 1)]);
     db.doc("asesor/ultimo").onSnapshot(s => { if (s.exists) { S.asesor = s.data(); scheduleRender() } }, onErr);
+    db.collection("categorias").onSnapshot(s => { S.categorias = withId(s); aplicarCategorias(); scheduleRender() }, onErr);
     db.collection("reglas").onSnapshot(s => { S.reglas = withId(s); scheduleRender() }, onErr);
     const byCreado = (a, b) => (a.creado || 0) - (b.creado || 0);
     db.collection("presupuestos").onSnapshot(s => { S.pres = withId(s); render() }, onErr);
@@ -592,10 +606,11 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
 
   function emptyStart() {
     return `<section class="panel empty">
-      <h2>Empieza creando tus cuentas</h2>
-      <p>Agrega dónde tienes tu dinero (banco, Nequi, efectivo, tarjetas) y luego registra lo que ganas y lo que gastas.</p>
+      <h2>Registra tu primer gasto</h2>
+      <p>Anota lo que gastas en mercado, cenas, compras… y aquí verás cuánto se te va al mes en cada cosa. Si aún no tienes cuentas, lo guardo en Efectivo y luego creas las tuyas.</p>
       <div class="row">
-        <button class="btn primary" data-act="new-acc">Crear primera cuenta</button>
+        <button class="btn primary" data-act="new-mov">Registrar un gasto</button>
+        <button class="btn" data-act="new-acc">Crear mis cuentas</button>
         <button class="btn" data-act="seed">Probar con datos de ejemplo</button>
       </div>
     </section>`;
@@ -614,6 +629,10 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
         <div class="kpi"><span class="lbl">Ingresos del mes</span><span class="val num pos">${money(r.ing)}</span><span class="sub">${prev.ing ? "Mes anterior: " + compact(prev.ing) : "Sin ingresos el mes anterior"}</span></div>
         <div class="kpi"><span class="lbl">Gastos del mes</span><span class="val num neg">${money(r.gas)}</span><span class="sub">${dGas == null ? "Sin comparación" : (dGas > 0 ? "▲ " : "▼ ") + Math.abs(Math.round(dGas * 100)) + "% vs. mes anterior"}</span></div>
         <div class="kpi"><span class="lbl">Tasa de ahorro</span><span class="val num ${r.tasa == null ? "" : r.tasa < 0 ? "neg" : r.tasa >= .2 ? "pos" : ""}">${r.tasa == null ? "—" : Math.round(r.tasa * 100) + "%"}</span><span class="sub">Meta sana: 20% o más</span></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Cuánto gastas al mes</h2><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="hint">Últimos 6 meses por categoría</span><button class="btn small" data-act="new-cat">+ Categoría</button></div></div>
+        ${tablaMensual()}
       </section>
       <div class="grid2">
         <section class="panel chart">
@@ -635,6 +654,24 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
           <div class="cats">${S.cuentas.map(c => { const s = saldoCuenta(c); return `<div class="cat-row"><span>${esc(c.nombre)} <span class="hint">${TIPO_CUENTA[c.tipo] || ""}</span></span><span class="num ${s < 0 ? "neg" : ""}">${money(s, c.moneda)}</span></div>` }).join("")}</div>
         </section>
       </div>`;
+  }
+
+  function tablaMensual() {
+    const meses = Array.from({ length: 6 }, (_, i) => shiftMonth(S.month, -i)); // del más reciente al más antiguo
+    const datos = meses.map(m => resumenMes(m));
+    const activos = datos.filter(d => d.gas > 0).length || 1;
+    const propias = S.categorias.filter(c => c.tipo === "gasto").map(c => c.nombre);
+    const cats = [...new Set([...propias, ...datos.flatMap(d => Object.keys(d.porCat))])];
+    if (!cats.length) return `<p class="hint" style="margin:0">Aún no hay gastos. Usa “+ Movimiento” para registrar el primero.</p>`;
+    const filas = cats.map(c => { const vals = datos.map(d => d.porCat[c] || 0); return { c, vals, prom: vals.reduce((a, b) => a + b, 0) / activos, propia: propias.includes(c) } })
+      .sort((a, b) => b.prom - a.prom || a.c.localeCompare(b.c));
+    const tot = datos.map(d => d.gas), promTot = tot.reduce((a, b) => a + b, 0) / activos;
+    const celda = (v, i) => `<td class="r num ${meses[i] === S.month ? "cur" : ""}">${v ? compact(v) : "—"}</td>`;
+    return `<div class="tbl-wrap" style="margin:0"><table class="tbl month-tbl"><thead><tr><th>Categoría</th><th class="r">Promedio</th>${meses.map(m => `<th class="r ${m === S.month ? "cur" : ""}">${monthName(m, true).replace(".", "")}</th>`).join("")}</tr></thead><tbody>
+      ${filas.map(f => `<tr><td>${esc(f.c)}${ESENCIAL[f.c] === false ? '<span class="tag">prescindible</span>' : ""}</td><td class="r num"><b>${f.prom ? compact(f.prom) : "—"}</b></td>${f.vals.map(celda).join("")}</tr>`).join("")}
+      <tr class="tot"><td>Total</td><td class="r num"><b>${compact(promTot)}</b></td>${tot.map(celda).join("")}</tr>
+    </tbody></table></div>
+    <p class="hint" style="margin:10px 0 0">El promedio cuenta solo los meses en que registraste gastos (${activos} de 6).</p>`;
   }
 
   function alertas(r, prev) {
@@ -771,6 +808,9 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
         <button class="btn" data-act="save-cfg">Guardar</button>
       </div>
       <p class="hint" style="margin:10px 0 0">Cada movimiento en dólares o euros guarda la tasa del día en que lo registras, así tus meses pasados no cambian. Los saldos se convierten con la tasa de aquí.</p>
+      <h3 style="font-size:.9rem;margin-top:20px">Mis categorías</h3>
+      ${S.categorias.length ? `<div class="rules">${[...S.categorias].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(c => `<div><span><b>${esc(c.nombre)}</b> <span class="hint">(${c.tipo}${c.tipo === "gasto" ? (c.esencial ? ", necesario" : ", prescindible") : ""})</span></span><button class="btn small danger" data-del-cat="${c.id}">Quitar</button></div>`).join("")}</div>` : `<p class="hint" style="margin:6px 0 0">Aún no has creado categorías propias.</p>`}
+      <div style="margin-top:10px"><button class="btn small" data-act="new-cat">+ Nueva categoría</button></div>
       <h3 style="font-size:.9rem;margin-top:20px">Reglas de categorización</h3>
       ${S.reglas.length ? `<div class="rules">${[...S.reglas].sort((a, b) => a.patron.localeCompare(b.patron)).map(r => `<div><span>Si la descripción dice <b>“${esc(r.patron)}”</b> → ${esc(r.categoria)} <span class="hint">(${r.tipo})</span></span><button class="btn small danger" data-del-regla="${r.id}">Quitar</button></div>`).join("")}</div>` : `<p class="hint" style="margin:6px 0 0">Aún no hay reglas. Se crean solas cuando corriges una categoría al importar un extracto.</p>`}
     </section>`;
@@ -1145,6 +1185,12 @@ dialog.wide { width: min(980px, calc(100vw - 24px)) }
       if (pw.every(w => words.has(w)) && (!best || pw.length > best.n)) best = { n: pw.length, categoria: r.categoria };
     }
     if (best) return { categoria: best.categoria, fuente: "regla" };
+    const ws = norm(desc).split(/[^a-z0-9]+/);
+    for (const c of S.categorias) {
+      if (c.tipo !== tipo) continue;
+      const raiz = norm(c.nombre).replace(/s$/, "");
+      if (raiz.length >= 3 && ws.some(w => w.startsWith(raiz))) return { categoria: c.nombre, fuente: "regla" };
+    }
     const t = norm(desc);
     for (const [re, c] of tipo === "gasto" ? DICC_GASTO : DICC_INGRESO) if (re.test(t)) return { categoria: c, fuente: "dicc" };
     return null;
@@ -1699,7 +1745,7 @@ ${JSON.stringify(contextoIA())}`;
     const isT = t === "transferencia";
     $("wrapCat").hidden = isT; $("wrapDest").hidden = !isT; $("wrapPresc").hidden = t !== "gasto"; $("wrapDed").hidden = t !== "gasto";
     $("lblCuenta").textContent = isT ? "Cuenta origen" : "Cuenta";
-    if (!isT) { const cur = $("fCat").value; const list = CATS[t].map(([c]) => [c, c]); fillSelect($("fCat"), list, list.some(x => x[0] === cur) ? cur : list[0][0]); autoPresc() }
+    if (!isT) { const cur = $("fCat").value; const list = CATS[t].map(([c]) => [c, c]); fillSelect($("fCat"), [...list, ["__nueva__", "+ Nueva categoría…"]], list.some(x => x[0] === cur) ? cur : list[0][0]); catPrevia = $("fCat").value; autoPresc() }
     syncDest();
   }
   function autoPresc() { if (tipoSel === "gasto" && !editMov) $("fPresc").checked = ESENCIAL[$("fCat").value] === false; if (!editMov) $("fDed").checked = $("fCat").value === "Donaciones" }
@@ -1711,20 +1757,19 @@ ${JSON.stringify(contextoIA())}`;
     $("wrapTasa").hidden = !ext;
     if (ext) { $("lblTasa").textContent = `Tasa (1 ${o.moneda} en pesos)`; if (!$("fTasa").value || $("fTasa").dataset.auto) { $("fTasa").value = String(editMov?.tasa || tasaDe(o.moneda)); $("fTasa").dataset.auto = "1" } }
   }
-  let catTocada = false, notaT;
+  let catTocada = false, notaT, catPrevia = "";
   function sugerirCat() {
     if (editMov || catTocada || tipoSel === "transferencia") return;
     const g = categorizar($("fNota").value, tipoSel);
-    if (g && CATS[tipoSel].some(([c]) => c === g.categoria)) { $("fCat").value = g.categoria; autoPresc() }
+    if (g && CATS[tipoSel].some(([c]) => c === g.categoria)) { $("fCat").value = catPrevia = g.categoria; autoPresc() }
   }
   function openMov(m) {
-    if (!S.cuentas.length) { openAcc(); return }
     editMov = m || null;
     $("movTitle").textContent = m ? "Editar movimiento" : "Nuevo movimiento";
     $("movDel").hidden = !m; $("movDel").textContent = "Eliminar"; $("movDel").dataset.confirm = "";
-    const accs = S.cuentas.map(c => [c.id, `${c.nombre} (${c.moneda})`]);
-    fillSelect($("fCuenta"), accs, m?.cuentaId || S.filt.cuenta || S.cuentas[0].id);
-    fillSelect($("fDest"), accs, m?.cuentaDestinoId || (S.cuentas[1] || S.cuentas[0]).id);
+    const accs = S.cuentas.length ? S.cuentas.map(c => [c.id, `${c.nombre} (${c.moneda})`]) : [["__efectivo__", "Efectivo (se crea al guardar)"]];
+    fillSelect($("fCuenta"), accs, m?.cuentaId || S.filt.cuenta || accs[0][0]);
+    fillSelect($("fDest"), accs, m?.cuentaDestinoId || (accs[1] || accs[0])[0]);
     $("fMonto").value = m ? String(m.monto) : "";
     $("fMontoDest").value = m?.montoDestino != null ? String(m.montoDestino) : "";
     const t = today();
@@ -1734,12 +1779,43 @@ ${JSON.stringify(contextoIA())}`;
     catTocada = false; $("fTasa").value = m?.tasa ? String(m.tasa) : ""; $("fTasa").dataset.auto = m?.tasa ? "" : "1";
     $("fCat").innerHTML = "";
     setTipo(m?.tipo || "gasto");
-    if (m?.categoria) $("fCat").value = m.categoria;
+    if (m?.categoria && m.tipo !== "transferencia") {
+      if (![...$("fCat").options].some(o => o.value === m.categoria)) $("fCat").add(new Option(m.categoria, m.categoria), 0);
+      $("fCat").value = catPrevia = m.categoria;
+    }
     $("fPresc").checked = !!m?.prescindible; $("fDed").checked = !!m?.deducible;
     if (!m) autoPresc();
     $("movErr").textContent = "";
     $("movDlg").showModal();
     setTimeout(() => $("fMonto").focus(), 30);
+  }
+  function openNuevaCategoria(tipo, desdeMov) {
+    openForm({
+      title: "Nueva categoría",
+      intro: "Crea las categorías que quieras seguir mes a mes, por ejemplo Cenas, Gimnasio o Mascotas.",
+      saveLabel: "Crear categoría",
+      fields: [
+        { id: "nombre", label: "Nombre", type: "text", required: true, full: true, placeholder: "Ej: Cenas" },
+        { id: "tipo", label: "Tipo", type: "select", value: tipo === "ingreso" ? "ingreso" : "gasto", options: [["gasto", "Gasto"], ["ingreso", "Ingreso"]] },
+        { id: "esencial", label: "¿Es un gasto necesario?", type: "select", value: "no", options: [["no", "No, se podría reducir"], ["si", "Sí, es necesario"]] },
+      ],
+      save: async (v) => {
+        let nombre = v.nombre.replace(/\s+/g, " ").trim().slice(0, 30);
+        nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1);
+        if (nombre.length < 2) return "Escribe un nombre de al menos 2 letras.";
+        if (CATS[v.tipo].some(([c]) => norm(c) === norm(nombre))) return `Ya existe la categoría “${nombre}”.`;
+        const id = slug(v.tipo + "-" + nombre), data = { nombre, tipo: v.tipo, esencial: v.tipo === "ingreso" || v.esencial === "si", creado: Date.now() };
+        await put("categorias", id, data);
+        if (!S.categorias.some(x => x.id === id)) S.categorias.push({ ...data, id });
+        aplicarCategorias();
+        if (desdeMov && $("movDlg").open && v.tipo === tipoSel) { setTipo(tipoSel); $("fCat").value = catPrevia = nombre; catTocada = true; autoPresc() }
+        render(); toast(`Categoría “${nombre}” creada`);
+      }
+    });
+  }
+  async function quitarCategoria(id) {
+    try { await del("categorias", id); S.categorias = S.categorias.filter(x => x.id !== id); aplicarCategorias(); render(); toast("Categoría quitada. Los gastos ya registrados la conservan.") }
+    catch (e) { toast(writeErr(e)) }
   }
   function openPago(cardId) {
     const c = cuentaById(cardId), origen = S.cuentas.find(x => !isCard(x));
@@ -1758,7 +1834,8 @@ ${JSON.stringify(contextoIA())}`;
     if (!(monto > 0)) { $("movErr").textContent = "Escribe un monto mayor que cero, por ejemplo 45000."; return }
     const fecha = $("fFecha").value;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { $("movErr").textContent = "Elige una fecha."; return }
-    const cuentaId = $("fCuenta").value, c = cuentaById(cuentaId);
+    const cuentaId = $("fCuenta").value, c = cuentaById(cuentaId), crearEfectivo = cuentaId === "__efectivo__";
+    if (crearEfectivo && tipoSel === "transferencia") { $("movErr").textContent = "Para una transferencia necesitas al menos dos cuentas. Créalas en la pestaña Cuentas."; return }
     const data = { tipo: tipoSel, monto, fecha, cuentaId, moneda: c?.moneda || "COP", nota: $("fNota").value.trim(), creado: editMov?.creado || Date.now() };
     if (editMov?.ejemplo) data.ejemplo = true;
     if (editMov?.importado) data.importado = editMov.importado;
@@ -1789,6 +1866,7 @@ ${JSON.stringify(contextoIA())}`;
     }
     $("movSave").disabled = true;
     try {
+      if (crearEfectivo) { const idc = uid(); await put("cuentas", idc, { nombre: "Efectivo", tipo: "efectivo", moneda: "COP", saldoInicial: 0, creado: Date.now() }); data.cuentaId = idc; setTimeout(() => toast("Creé la cuenta Efectivo con saldo 0. Pon tu saldo real en Cuentas → Editar."), 2700) }
       await put("movs", editMov?.id || uid(), data);
       registrarAnios([fecha]).catch(() => { });
       $("movDlg").close(); toast(editMov ? "Movimiento actualizado" : "Movimiento guardado");
@@ -1904,6 +1982,7 @@ ${JSON.stringify(contextoIA())}`;
     const ds = t.dataset;
     if (ds.importAcc) return openImport(ds.importAcc);
     if (ds.ask) return preguntar(ds.ask);
+    if (ds.delCat) { if (!ds.confirm) { ds.confirm = "1"; t.textContent = "¿Seguro?"; return } return quitarCategoria(ds.delCat) }
     if (ds.agendar) { const [k, i] = ds.agendar.split("|"); return agendar(k, i) }
     if (ds.undoLote) { if (!ds.confirm) { ds.confirm = "1"; t.textContent = "¿Seguro? Toca otra vez"; return } return deshacerLote(ds.undoLote) }
     if (ds.delRegla) { return del("reglas", ds.delRegla).then(() => toast("Regla eliminada"), e => toast(writeErr(e))) }
@@ -1932,6 +2011,7 @@ ${JSON.stringify(contextoIA())}`;
     else if (a === "unseed") unseed();
     else if (a === "save-cfg") { const u = parseAmount($("cfgUSD").value), e2 = parseAmount($("cfgEUR").value); const uv = parseAmount($("cfgUVT").value), yy = today().slice(0, 4); if (u > 0 && e2 > 0 && uv > 0) putConfig({ tasaUSD: u, tasas: { USD: u, EUR: e2 }, uvt: { ...(S.config.uvt || {}), [yy]: uv } }).then(() => toast("Configuración guardada"), e => toast(writeErr(e))); else toast("Escribe valores válidos, por ejemplo 4100, 4450 y 52374") }
     else if (a === "analizar") analizar();
+    else if (a === "new-cat") openNuevaCategoria("gasto", false);
     else if (a === "chat-clear") { S.chat = []; render() }
     else if (a === "chat-stop") chatCtl?.abort();
     else if (a === "export-mes") exportar("mes");
@@ -1949,7 +2029,11 @@ ${JSON.stringify(contextoIA())}`;
   });
   $("view").addEventListener("submit", e => { if (e.target.id === "askForm") { e.preventDefault(); const q = $("askQ").value; $("askQ").value = ""; preguntar(q) } });
   $("tipoSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTipo(b.dataset.v) });
-  $("fCat").addEventListener("change", () => { catTocada = true; autoPresc() });
+  $("fCat").addEventListener("change", () => {
+    const v = $("fCat").value;
+    if (v === "__nueva__") { $("fCat").value = catPrevia; openNuevaCategoria(tipoSel, true); return }
+    catPrevia = v; catTocada = true; autoPresc();
+  });
   $("fNota").addEventListener("input", () => { clearTimeout(notaT); notaT = setTimeout(sugerirCat, 250) });
   $("fTasa").addEventListener("input", () => { $("fTasa").dataset.auto = "" });
   // Importación

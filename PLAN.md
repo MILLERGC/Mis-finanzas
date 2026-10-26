@@ -89,3 +89,9 @@ Cada fase se publica en la misma URL del artefacto y se commitea en `claude/eleg
 - Exportar a Excel (mes o año) con hojas de movimientos, resumen mensual, deudas y metas.
 - Recordatorios en Google Calendar para pagos de tarjeta, deudas y cobros (mensuales cuando aplica, con avisos 1 día y 1 hora antes).
 - Resumen semanal por correo con una tarea programada (fuera de la página).
+
+## Ajuste (v0.5): gastos por categoría al mes
+- Categorías propias (colección `categorias`): se crean desde el formulario de movimiento ("+ Nueva categoría…") o en Cuentas → Configuración, y se pueden quitar.
+- Tabla "Cuánto gastas al mes" en el Resumen: cada categoría con su promedio y los últimos 6 meses.
+- Se puede registrar el primer gasto sin crear cuentas: se crea "Efectivo" automáticamente.
+- Si la nota menciona una categoría propia ("cena del viernes" → Cenas), se sugiere sola.
